@@ -1,28 +1,31 @@
-# reception.sh — teardown + landing-page clone
+# hshelby
 
-A study of [reception.sh](https://reception.sh) ("agentic in app support" for iOS apps): what the product is, how it works under the hood, and a rebuild of its marketing site.
+In-app support chat for iOS apps, modelled on a study of [reception.sh](https://reception.sh). This repo holds the backend, the team dashboard, and the research behind them.
 
-| File | What's in it |
+| Path | What |
 |---|---|
-| [`docs/PRODUCT_TEARDOWN.md`](docs/PRODUCT_TEARDOWN.md) | How the product works: features and their mechanics, SDK surface, identity/JWT flow, message protocol, push, Telegram, automations, inferred architecture, data model, phased rebuild plan. Facts cite the docs; inferences are labelled. |
-| [`docs/BACKEND_PLAN.md`](docs/BACKEND_PLAN.md) | How to build the backend: stack decisions, architecture, data model, the message-send transaction, API contract, jobs, security checklist, and a phased schedule with acceptance tests. |
-| [`preview/`](preview/) | Walkthrough video and screenshots of the clone. |
-| [`SITE_SPEC.md`](SITE_SPEC.md) | Exhaustive spec of the landing page: every color token (light + dark), type scale, spacing, animation timings, and section-by-section copy and classes, extracted from the scraped HTML/CSS/JS. |
-| `src/` | Next.js 16 + Tailwind v4 rebuild of the landing page, built from the spec. |
+| `apps/api` | Hono API. Better Auth (email + password, organizations, Stripe test-mode subscriptions) at `/api/auth/*`, org-scoped app routes at `/api/*`. |
+| `apps/worker` | pg-boss jobs and cron (nightly cleanup). |
+| `apps/dashboard` | Next.js dashboard: sign-up/in and the onboarding flow (Add app → Connect → Integrations → Subscribe). |
+| `apps/web` | Landing-page clone from the study. Not deployed: it reproduces another company's brand. |
+| `packages/*` | `db` (Drizzle schema + migrations), `contracts` (Zod schemas), `core` (IDs, encryption, App Store client, setup prompt), `ui` (phone and chat mock). |
+| [`docs/BACKEND_PLAN.md`](docs/BACKEND_PLAN.md) | Stack, data model, API contract and phased schedule. Its Status section covers what runs on Railway staging and the variables each service needs. |
+| [`docs/PRODUCT_TEARDOWN.md`](docs/PRODUCT_TEARDOWN.md) | How reception works: features, SDK surface, identity flow, inferred architecture. |
+| [`SITE_SPEC.md`](SITE_SPEC.md), [`preview/`](preview/) | Spec, video and screenshots of the landing-page clone. |
 
-## Run it
+## Run it locally
+
+Needs Node 22 and a Postgres you can reach (the tests default to `postgres://postgres@localhost:5433/hshelby_test`).
 
 ```bash
 npm install
-npm run dev      # http://localhost:3000
-npm run build && npm start
+cp apps/api/.env.example apps/api/.env              # fill in BETTER_AUTH_SECRET and ENC_KEYS
+cp apps/dashboard/.env.example apps/dashboard/.env
+npm run db:migrate     # DATABASE_URL, default postgres://postgres@localhost:5433/hshelby_dev
+npm run dev:api        # http://localhost:8080
+npm run dev:dashboard  # http://localhost:3000
 ```
 
-## What's faithful and what isn't
+Checks (CI runs the same): `npm run typecheck && npm run lint && npm test && npm run build`.
 
-- **Faithful:** layout, spacing, colors (light and dark), type scale, copy, the four animated hero scenes (upsell/paywall flow, retention, integrations, App Store review), feature cards with "read more" overlays, language ticker, founder note, pricing, FAQ, theme toggle, floating chat launcher.
-- **Substituted on purpose:**
-  - **Font:** Suisse Intl is a commercial font, so Inter stands in under the same CSS variable. Instrument Serif (OFL) is used as in the original.
-  - **Photos and logos:** the crumpled bills, scooter, chrome stars, gold car, iPhone/Mac frames, customer app icons and founder photos belong to reception or to third parties, so none were copied. All of them are CSS/SVG stand-ins in `src/components/art/`; swap one component to use real assets.
-  - **Routes:** `/login`, `/docs`, `/inbox` and the legal pages are not rebuilt and land on a not-found page.
-- The page sets `robots: noindex`. It reproduces another company's brand and copy, so it's for study only; rebrand it before deploying anything public.
+Stripe runs in test mode only. Billing stays off until all four `STRIPE_*` variables are set, and the API refuses `sk_live_` keys.
