@@ -1,0 +1,38 @@
+{
+  "name": "@hshelby/api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@better-auth/stripe": "^1.7.14",
+    "@hono/node-server": "^2.1.5",
+    "better-auth": "^1.7.14",
+    "drizzle-orm": "^0.45.4",
+    "hono": "^4.13.14",
+    "pg": "^8.23.1",
+    "pino": "^9.14.0",
+    "stripe": "^23.0.1",
+    "zod": "^4.6.7",
+    "@hshelby/contracts": "*",
+    "@hshelby/core": "*",
+    "@hshelby/db": "*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.5",
+    "@types/pg": "^8.23.1",
+    "pino-pretty": "^13.2.0",
+    "tsup": "^9.0.0",
+    "tsx": "^4.23.15",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.7"
+  },
+  "scripts": {
+    "dev": "tsx watch --env-file-if-exists=.env src/index.ts",
+    "build": "tsup",
+    "start": "NODE_ENV=production node dist/index.js",
+    "migrate": "node dist/migrate.js",
+    "migrate:dev": "tsx --env-file-if-exists=.env src/migrate.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  }
+}

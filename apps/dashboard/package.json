@@ -1,0 +1,33 @@
+{
+  "name": "@hshelby/dashboard",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev --port 3000",
+    "build": "next build",
+    "start": "next start --port ${PORT:-3000}",
+    "lint": "eslint",
+    "typecheck": "next typegen && tsc --noEmit"
+  },
+  "dependencies": {
+    "next": "16.4.3",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "@hshelby/contracts": "*",
+    "@hshelby/ui": "*",
+    "@radix-ui/react-icons": "^1.3.2",
+    "@phosphor-icons/react": "^2.1.10",
+    "better-auth": "1.7.14",
+    "@better-auth/stripe": "1.7.14"
+  },
+  "devDependencies": {
+    "@tailwindcss/turbopack": "^4",
+    "@types/node": "^22",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "eslint": "^9",
+    "eslint-config-next": "16.4.3",
+    "tailwindcss": "^4",
+    "typescript": "^5"
+  }
+}

@@ -1,0 +1,52 @@
+@import "tailwindcss";
+@import "../../../../packages/ui/src/styles.css";
+@source "../../../../packages/ui/src";
+
+:root {
+  --bg: #fff;
+  --fg: #242424;
+  --secondary: #909090;
+  --muted: #b8b8b8;
+  --panel: #f7f7f7;
+  --panel-hover: #ececef;
+  --line: #e7e7ea;
+  --field: #d2d2d7;
+  --accent: #ff4b2b;
+  --accent-hover: #e93e20;
+  --accent-disabled: #f9a090;
+  --brand-mark: #f60;
+  --ios-blue: #007aff;
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  color-scheme: light;
+}
+
+@theme inline {
+  --font-sans: var(--font-inter);
+  --color-bg: var(--bg);
+  --color-fg: var(--fg);
+  --color-secondary: var(--secondary);
+  --color-muted: var(--muted);
+  --color-panel: var(--panel);
+  --color-line: var(--line);
+  --color-accent: var(--accent);
+}
+
+html,
+body {
+  background: var(--bg);
+  color: var(--fg);
+}
+
+body {
+  font-family: var(--font-inter), system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+::selection {
+  background: #d9e6f8;
+}
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
