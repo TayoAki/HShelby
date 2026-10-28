@@ -9,6 +9,8 @@
     "@hshelby/contracts": "*",
     "@hshelby/core": "*",
     "@hshelby/db": "*",
+    "@hshelby/push": "*",
+    "pg-boss": "^12.38.0",
     "better-auth": "^1.7.14",
     "drizzle-orm": "^0.45.4",
     "hono": "^4.13.14",

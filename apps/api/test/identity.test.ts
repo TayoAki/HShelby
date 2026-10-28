@@ -1,15 +1,16 @@
 /* eslint-disable @typescript-eslint/no-explicit-any -- response bodies are asserted on, not typed */
 import { randomUUID } from "node:crypto";
-import { auditEvents, conversations, devices, members, messages } from "@hshelby/db";
+import { auditEvents, conversations, devices, messages } from "@hshelby/db";
 import { eq } from "drizzle-orm";
 import { SignJWT } from "jose";
 import { afterAll, describe, expect, it } from "vitest";
-import { makeTestApp, ORIGIN, registerDevice, signUp, workspaceWithApp as workspaceIn } from "./helpers";
+import { joinAsMember as joinIn, makeTestApp, registerDevice, workspaceWithApp as workspaceIn } from "./helpers";
 
-const { app, deps, pool } = makeTestApp();
-afterAll(() => pool.end());
+const { app, deps, close } = await makeTestApp();
+afterAll(close);
 
 const workspaceWithApp = (name?: string) => workspaceIn(app, name);
+const joinAsMember = (ownerCall: Parameters<typeof joinIn>[2]) => joinIn(app, deps, ownerCall);
 const now = () => Math.floor(Date.now() / 1000);
 
 /** A workspace with an app, plus its identity secret as the developer would reveal it. */
@@ -34,21 +35,6 @@ const register = (publicId: string, body: Record<string, unknown>) =>
 
 const deviceRow = async (id: string) => (await deps.db.select().from(devices).where(eq(devices.id, id)))[0];
 const deviceIdOf = (session: any) => JSON.parse(Buffer.from(session.accessToken.split(".")[1], "base64url").toString()).sub as string;
-
-/** Adds a second user to the owner's workspace as a plain member, active on it. */
-async function joinAsMember(ownerCall: Awaited<ReturnType<typeof signUp>>["call"]) {
-  const { organization } = (await (await ownerCall("/api/me")).json()) as any;
-  const member = await signUp(app, "Mary Member");
-  const { user } = (await (await member.call("/api/me")).json()) as any;
-  await deps.db.insert(members).values({ id: randomUUID(), organizationId: organization.id, userId: user.id, role: "member" });
-  const res = await member.call("/api/auth/organization/set-active", {
-    method: "POST",
-    headers: { origin: ORIGIN },
-    body: JSON.stringify({ organizationId: organization.id }),
-  });
-  expect(res.status).toBe(200);
-  return member;
-}
 
 describe("identity token vectors", () => {
   it("accepts a valid token and stores its claims, not the token", async () => {

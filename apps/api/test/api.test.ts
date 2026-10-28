@@ -4,8 +4,8 @@ import { eq } from "drizzle-orm";
 import { afterAll, describe, expect, it } from "vitest";
 import { makeTestApp, ORIGIN, signUp } from "./helpers";
 
-const { app, deps, pool } = makeTestApp();
-afterAll(() => pool.end());
+const { app, deps, close } = await makeTestApp();
+afterAll(close);
 
 describe("health and auth", () => {
   it("reports health", async () => {

@@ -9,6 +9,8 @@
  * --verified        also send an identity token for those values, signed with $IDENTITY_SECRET the way the
  *                   developer's server would (env var, so the secret stays out of shell history)
  * --meta KEY=VALUE  setMetadata() (repeatable; replaces the whole set)
+ * --push-token HEX  report an APNs device token (with --push-env sandbox|production, default sandbox),
+ *                   so "Send test" and replies target this device
  * --logout          logout(): end this device; the next run registers a new one
  * --delete          deleteData(): remove this device and its history
  * --new-device      start over as a new install
@@ -43,6 +45,8 @@ const { values: args } = parseArgs({
     email: { type: "string" },
     verified: { type: "boolean", default: false },
     meta: { type: "string", multiple: true },
+    "push-token": { type: "string" },
+    "push-env": { type: "string", default: "sandbox" },
     logout: { type: "boolean", default: false },
     delete: { type: "boolean", default: false },
   },
@@ -87,10 +91,12 @@ async function stagedState() {
       .sign(new TextEncoder().encode(secret));
   }
   const metadata = args.meta && Object.fromEntries(args.meta.map((kv) => [kv.slice(0, kv.indexOf("=")), kv.slice(kv.indexOf("=") + 1)]));
+  const pushToken = args["push-token"];
   return {
     ...(hasLabels && { identity: labels }),
     ...(identityToken && { identityToken }),
     ...(metadata && { metadata }),
+    ...(pushToken && { push: { token: pushToken, environment: args["push-env"] } }),
   };
 }
 

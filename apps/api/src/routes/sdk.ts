@@ -7,12 +7,13 @@ import {
   RegisterDeviceInput,
   SendMessageInput,
   type DeviceDetails,
+  type PushRegistration,
   type SdkConversation,
   type SdkMessage,
 } from "@hshelby/contracts";
 import { decryptSecret, newDeviceSecret, uuidv7 } from "@hshelby/core";
-import { apps, conversations, devices } from "@hshelby/db";
-import { and, eq, isNull, sql } from "drizzle-orm";
+import { apps, conversations, devices, type Db, type Tx } from "@hshelby/db";
+import { and, eq, isNull, ne, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import type { Deps, SdkEnv } from "../context";
 import { hashDeviceSecret, signAccessToken } from "../device-tokens";
@@ -44,6 +45,30 @@ const toSdkMessage = (m: MessageRow): SdkMessage => ({
 const cleanDetails = (details: DeviceDetails = {}) =>
   Object.fromEntries(Object.entries(details).map(([k, v]) => [k, v === "" ? null : v]));
 
+/** Push columns for a registration or update: undefined leaves them alone, null clears the token. */
+const pushColumns = (push: PushRegistration | null | undefined) => {
+  if (push === undefined) return {};
+  if (push === null) return { pushToken: null, pushEnv: null };
+  return {
+    pushToken: push.token,
+    pushEnv: push.environment,
+    updatesAppBadge: push.updatesAppBadge,
+    pushIssue: null,
+    pushIssueAt: null,
+  };
+};
+
+/**
+ * One phone, one recipient: a token that moves to a new device record (after a logout or reinstall)
+ * is taken off the app's other devices, so nobody gets the same notification twice.
+ */
+async function releasePushToken(db: Db | Tx, appId: string, token: string, keepDeviceId: string) {
+  await db
+    .update(devices)
+    .set({ pushToken: null, pushEnv: null })
+    .where(and(eq(devices.appId, appId), eq(devices.pushToken, token), ne(devices.id, keepDeviceId)));
+}
+
 /** The API the iOS SDK talks to, under /v1. */
 export function sdkRoutes(deps: Deps) {
   const { db } = deps;
@@ -69,17 +94,22 @@ export function sdkRoutes(deps: Deps) {
 
     const deviceId = uuidv7();
     const deviceSecret = newDeviceSecret();
-    const [device] = await db
-      .insert(devices)
-      .values({
-        id: deviceId,
-        appId: app.id,
-        secretHash: hashDeviceSecret(deviceSecret),
-        ...cleanDetails(input.device),
-        ...identity,
-        metadata: input.metadata ? nextMetadata({}, input.metadata) : {},
-      })
-      .returning();
+    const device = await db.transaction(async (tx) => {
+      const [row] = await tx
+        .insert(devices)
+        .values({
+          id: deviceId,
+          appId: app.id,
+          secretHash: hashDeviceSecret(deviceSecret),
+          ...cleanDetails(input.device),
+          ...identity,
+          metadata: input.metadata ? nextMetadata({}, input.metadata) : {},
+          ...pushColumns(input.push),
+        })
+        .returning();
+      if (input.push) await releasePushToken(tx, app.id, input.push.token, deviceId);
+      return row;
+    });
     const token = await signAccessToken(deps.deviceTokenKey, { deviceId, appId: app.id, sessionVersion: 1 });
     c.header("Cache-Control", "no-store");
     return c.json({ deviceSecret, ...token, identity: toSdkIdentity(device!) }, 201);
@@ -114,7 +144,13 @@ export function sdkRoutes(deps: Deps) {
     const { deviceSecret } = await parseJson(c, LogoutInput);
     await db
       .update(devices)
-      .set({ signedOutAt: new Date(), sessionVersion: sql`${devices.sessionVersion} + 1`, updatedAt: new Date() })
+      .set({
+        signedOutAt: new Date(),
+        sessionVersion: sql`${devices.sessionVersion} + 1`,
+        pushToken: null,
+        pushEnv: null,
+        updatedAt: new Date(),
+      })
       .where(and(eq(devices.secretHash, hashDeviceSecret(deviceSecret)), isNull(devices.signedOutAt)));
     return c.body(null, 204);
   });
@@ -132,10 +168,12 @@ export function sdkRoutes(deps: Deps) {
           ...cleanDetails(input.device),
           ...nextIdentity(current!, input.identity, claims),
           ...(input.metadata && { metadata: nextMetadata(current!.metadata, input.metadata) }),
+          ...pushColumns(input.push),
           updatedAt: new Date(),
         })
         .where(eq(devices.id, current!.id))
         .returning();
+      if (input.push) await releasePushToken(tx, current!.appId, input.push.token, current!.id);
       return updated!;
     });
     return c.json({ identity: toSdkIdentity(device) });

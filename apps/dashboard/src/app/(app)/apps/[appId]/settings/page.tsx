@@ -1,17 +1,17 @@
 "use client";
 
 import { IDENTITY_SECRET_ENV, type App, type IdentitySecret } from "@hshelby/contracts";
-import { ArrowLeftIcon, CheckIcon, CopyIcon } from "@radix-ui/react-icons";
+import { ArrowLeftIcon } from "@radix-ui/react-icons";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState } from "react";
 import { AppHeader } from "@/components/AppHeader";
+import { PushSettingsCard } from "@/components/PushSettingsCard";
+import { CopyBlock, secondaryButton, SettingsCard, SwitchRow } from "@/components/settings";
 import { AppIcon, ErrorNote, Spinner } from "@/components/ui";
 import { api } from "@/lib/api";
 import { relativeTime } from "@/lib/time";
 import { isAdmin, useMe } from "@/lib/use-me";
-import { useCopy } from "@/lib/use-copy";
-
 
 const snippet = `import { SignJWT } from "jose";
 
@@ -22,32 +22,6 @@ export async function supportToken(user) {
     .setExpirationTime("7d")
     .sign(new TextEncoder().encode(process.env.${IDENTITY_SECRET_ENV}));
 }`;
-
-function Card({ title, children }: { title: string; children: ReactNode }) {
-  return (
-    <section className="rounded-[28px] bg-panel p-6">
-      <h2 className="text-[19px] tracking-[-.02em]">{title}</h2>
-      <div className="mt-3 space-y-4 text-[14px] leading-[1.55] text-fg/80">{children}</div>
-    </section>
-  );
-}
-
-function CopyBlock({ value, mono = true }: { value: string; mono?: boolean }) {
-  const { copied, copy } = useCopy();
-  return (
-    <div className="relative rounded-2xl bg-white p-4 pr-12 outline outline-1 -outline-offset-1 outline-black/5">
-      <pre className={`overflow-x-auto whitespace-pre text-[12.5px] leading-[1.6] ${mono ? "font-mono" : ""}`}>{value}</pre>
-      <button
-        type="button"
-        onClick={() => copy(value)}
-        aria-label="Copy"
-        className="absolute top-3 right-3 rounded-full p-1.5 text-secondary hover:bg-panel hover:text-fg"
-      >
-        {copied ? <CheckIcon /> : <CopyIcon />}
-      </button>
-    </div>
-  );
-}
 
 export default function AppSettingsPage() {
   const { appId } = useParams<{ appId: string }>();
@@ -130,7 +104,7 @@ export default function AppSettingsPage() {
             </div>
           </div>
 
-          <Card title="Identity verification">
+          <SettingsCard title="Identity verification">
             <p>
               Your server signs a short token for the signed-in user, so your team can trust who they&apos;re talking to.
               The app passes it to the SDK; we store the verified claims, never the token. Users with a valid token get
@@ -160,7 +134,7 @@ export default function AppSettingsPage() {
                       type="button"
                       onClick={reveal}
                       disabled={busy}
-                      className="mt-3 h-10 rounded-full bg-white px-4 text-[14px] text-fg outline outline-1 -outline-offset-1 outline-black/10 hover:bg-[var(--panel-hover)]"
+                      className={`mt-3 ${secondaryButton}`}
                     >
                       Reveal secret
                     </button>
@@ -195,32 +169,19 @@ export default function AppSettingsPage() {
               )}
             </div>
 
-            <div className="flex items-start justify-between gap-6 border-t border-line pt-4">
-              <div>
-                <p className="text-fg">Only verified users can chat</p>
-                <p className="mt-1">
-                  Unverified users can read the conversation but can&apos;t send; their app asks them to sign in. Turn this on
-                  once your app sends tokens.
-                </p>
-              </div>
-              <button
-                type="button"
-                role="switch"
-                aria-checked={app.onlyVerified}
-                aria-label="Only verified users can chat"
-                onClick={toggleOnlyVerified}
+            <div className="border-t border-line pt-4">
+              <SwitchRow
+                label="Only verified users can chat"
+                description="Unverified users can read the conversation but can't send; their app asks them to sign in. Turn this on once your app sends tokens."
+                checked={app.onlyVerified}
+                onChange={toggleOnlyVerified}
                 disabled={!admin || busy}
-                title={admin ? undefined : "Only workspace owners and admins can change this"}
-                className={`relative mt-1 h-7 w-12 shrink-0 rounded-full transition-colors disabled:opacity-50 ${
-                  app.onlyVerified ? "bg-[var(--accent)]" : "bg-[var(--field)]"
-                }`}
-              >
-                <span
-                  className={`absolute top-1 left-1 size-5 rounded-full bg-white shadow transition-transform ${app.onlyVerified ? "translate-x-5" : ""}`}
-                />
-              </button>
+                disabledReason="Only workspace owners and admins can change this"
+              />
             </div>
-          </Card>
+          </SettingsCard>
+
+          <PushSettingsCard app={app} admin={admin} />
         </main>
       )}
     </div>

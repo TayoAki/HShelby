@@ -38,6 +38,14 @@ export const devices = pgTable(
     verifiedAt: ts("verified_at"),
     /** setMetadata(): up to 20 string entries, replaced as a whole. */
     metadata: jsonb("metadata").$type<Record<string, string>>().notNull().default({}),
+    /** Raw APNs device token (hex) and the APNs environment it belongs to. */
+    pushToken: text("push_token"),
+    pushEnv: text("push_env", { enum: ["sandbox", "production"] }),
+    /** Whether pushes set the app icon badge (false when the host app owns its badge). */
+    updatesAppBadge: boolean("updates_app_badge").notNull().default(true),
+    /** The last APNs rejection for this device, shown in the dashboard; cleared by a delivery or a new token. */
+    pushIssue: text("push_issue"),
+    pushIssueAt: ts("push_issue_at"),
     blocked: boolean("blocked").notNull().default(false),
     lastSeenAt: ts("last_seen_at"),
     /** logout(): the credential is dead and the history stays; the app registers a new device next. */
@@ -47,7 +55,11 @@ export const devices = pgTable(
     /** Unused: deleteData() removes the row. Kept until a later migration drops it. */
     deletedAt: ts("deleted_at"),
   },
-  (t) => [index("devices_app_idx").on(t.appId), index("devices_app_user_idx").on(t.appId, t.userIdExt)],
+  (t) => [
+    index("devices_app_idx").on(t.appId),
+    index("devices_app_user_idx").on(t.appId, t.userIdExt),
+    index("devices_app_push_token_idx").on(t.appId, t.pushToken).where(sql`${t.pushToken} is not null`),
+  ],
 );
 
 /**

@@ -396,6 +396,11 @@ export function Thread({ conversationId }: { conversationId: string }) {
           <Detail label="Time zone" value={device.timezone} />
           <Detail label="First seen" value={relativeTime(device.createdAt)} />
           <Detail label="Last active" value={device.lastSeenAt ? relativeTime(device.lastSeenAt) : null} />
+          <Detail
+            label="Notifications"
+            value={device.push.enabled ? (device.push.environment === "sandbox" ? "On · Sandbox" : "On · Production") : "Off"}
+          />
+          {device.push.issue && <Detail label="Push issue" value={device.push.issue} />}
         </DetailsSection>
         <div className="flex flex-col items-start gap-2">
           <button

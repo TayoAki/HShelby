@@ -27,7 +27,7 @@ Why one Postgres for everything at the start: messages, the job queue, realtime 
 
 ## Status
 
-**B0, B1 and B4 run on Railway staging** (project `hshelby`, environment `staging`): dashboard at `https://dashboard-staging-0dee.up.railway.app`, API at `https://api-staging-f8f8.up.railway.app`.
+**B0, B1, B3 and B4 run on Railway staging** (project `hshelby`, environment `staging`): dashboard at `https://dashboard-staging-0dee.up.railway.app`, API at `https://api-staging-f8f8.up.railway.app`.
 
 B1 (messaging core) as built:
 
@@ -37,7 +37,7 @@ B1 (messaging core) as built:
 - **Inbox API** (`apps/api/src/routes/inbox.ts`): conversations list (status/app filters, keyset cursor), detail, thread paging, reply, read, resolve/reopen, device block/unblock (audited). `conversations.organization_id` is denormalized from the app for the inbox index.
 - **Dashboard:** `/inbox` with a polled list and thread (optimistic replies, resolve, block, device details). Onboarding's "waiting for your first message" completes on the first real message.
 - **Try it without an app:** `npx tsx apps/api/scripts/sdk-sim.ts --app app_… --api <api url> --say "Hello" --chat` plays the SDK.
-- **Deferred to their phases:** push (B3), photos (B2), realtime (B6; polling until then), rate limits on `POST /v1/devices` (B12).
+- **Deferred to their phases:** photos (B2), realtime (B6; polling until then), rate limits on `POST /v1/devices` (B12).
 
 B4 (identity and deletion) as built:
 
@@ -51,6 +51,16 @@ B4 (identity and deletion) as built:
 - **Delete:** `DELETE /v1/device` and admin `DELETE /api/devices/:id` (audited) remove the device with its conversations and messages in one statement (foreign-key cascades). Deleted apps are purged by the worker's `purge.deleted-apps` job every 15 minutes, in batches.
 - **Dashboard:** names, emails and a verified seal in the inbox, search (name, email, user ID, latest message), user and custom-field details, a signed-out notice, admin "Delete user data", and an app Settings page for the secret, rotation and only-verified mode. The setup prompt gains an identity-verification step.
 - **Not yet:** `devices.deleted_at` is unused and will be dropped in a later migration (dropping it now would break the running version mid-deploy).
+
+B3 (push) as built:
+
+- **Package** `packages/push`: an HTTP/2 APNs client (token auth; ES256 provider tokens cached 50 minutes per key; one connection per host), notification content (title/body templates with `{message}`, `{agent}`, `{app}` filled in one pass; title ≤100 and body ≤500 characters; preview and sound switches; sender name; badge = the conversation's unread count unless the app owns its badge; `thread-id` and the conversation ID for tap-to-open), and delivery with outcome handling. `@hshelby/push/testing` has a fake APNs server for tests.
+- **Devices:** registration and `PATCH /v1/device` take `push: {token, environment, updatesAppBadge}` (raw APNs token in hex; `null` clears it). A token reported by a new device is removed from the app's other devices; logout clears it.
+- **Sending:** a teammate's reply enqueues `push.send` inside its own transaction (pg-boss `fromDrizzle`), keyed by message ID. The worker sends it to the device's environment; Postgres LISTEN/NOTIFY wakes the worker immediately.
+- **APNs answers:** 410 drops the token; device rejections (BadDeviceToken, DeviceTokenNotForTopic) are kept as the device's push issue; key rejections (403, BadTopic) flag the app's settings; 429/5xx/timeouts retry with exponential backoff (5 retries) and are recorded on the last attempt. A delivery clears earlier issues.
+- **Dashboard:** app Settings has a Push notifications card: `.p8` upload (validated, stored encrypted, never returned; the Key ID is read from Apple's file name), Key/Team/Bundle IDs, templates with a live preview, "Send test" to up to 10 recent devices with per-device results, and remove. Device details show notification status and the last push issue. Changes are admin-only and audited.
+- **Not verified here:** delivery to a real iPhone. That needs an Apple key and a device; everything up to Apple's servers is tested against the fake APNs.
+- **Deferred:** per-language templates, skipping pushes while the user is in the chat (needs B6 presence), offer-card pushes (B7).
 
 Where B0 differs from the plan below:
 
@@ -79,6 +89,7 @@ Variables (secrets are set in Railway only, never in the repo):
 | api | `PUBLIC_API_URL` | `https://${{RAILWAY_PUBLIC_DOMAIN}}` |
 | api | `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_PRICE_MONTHLY`, `STRIPE_PRICE_YEARLY` | Stripe sandbox values; webhook endpoint `https://<api domain>/api/auth/stripe/webhook` |
 | worker | `DATABASE_URL` | `${{Postgres.DATABASE_URL}}` |
+| worker | `ENC_KEYS` | `${{api.ENC_KEYS}}` (decrypts apps' APNs keys) |
 | dashboard | `API_INTERNAL_URL` | `http://${{api.RAILWAY_PRIVATE_DOMAIN}}:${{api.PORT}}`, read at build time |
 
 ---
@@ -373,7 +384,7 @@ Each phase ends with acceptance tests that must pass in CI and on staging.
 | **B0 Foundations** (done, see Status) | Monorepo, move landing page to `apps/web`, Postgres + Drizzle migrations, Hono skeleton with error envelope, `contracts` → OpenAPI, Better Auth (Google), orgs/members/invitations/apps CRUD, encryption util, pino logs + Sentry, Railway staging deploy with migrate-on-deploy, CI | A teammate signs in with Google, creates an org and an app, and sees its `app_…` ID on staging | 1 wk |
 | **B1 Messaging core** (done, see Status) | Device register/refresh, conversation sync, send with seq + idempotency, read/unread, inbox list/thread/reply/resolve/block | A script acting as the SDK sends 200 concurrent messages with 20% retried `clientId`s → exactly 200 rows, seq 1–200 with no gaps; a dashboard reply shows up on the next poll | 2 wks |
 | **B2 Photos** | Presign, verify, signed GET, nightly cleanup | A wrong checksum is rejected; a pending upload disappears after 24h in a time-travel test | 0.5–1 wk |
-| **B3 Push** | `.p8` upload, `push.send`, env per device, templates, badge, issue capture, "send test" | Real device gets a push in sandbox and production builds; a revoked token clears itself | 1 wk |
+| **B3 Push** (built; real-device check pending, see Status) | `.p8` upload, `push.send`, env per device, templates, badge, issue capture, "send test" | Real device gets a push in sandbox and production builds; a revoked token clears itself | 1 wk |
 | **B4 Identity & deletion** (done, see Status) | `identify` labels, metadata limits, JWT verification, only-verified mode, logout/delete + `purge.scope` | JWT test vectors from the docs pass; a deleted device's rows and objects are gone | 1 wk |
 | **B5 Billing** | Stripe Checkout/Portal/webhooks, gating middleware, founder-spot counter | Test-mode subscription toggles reply access; users can still send while lapsed | 0.5–1 wk |
 | **MVP backend** | | | **≈ 6–7 wks** |

@@ -1,6 +1,6 @@
 import { CreateAppInput, RotateIdentitySecretInput, UpdateAppInput, type App as AppDto } from "@hshelby/contracts";
 import { buildSetupPrompt, decryptSecret, encryptSecret, newIdentitySecret, newPublicAppId, uuidv7 } from "@hshelby/core";
-import { apps, auditEvents, devices } from "@hshelby/db";
+import { apps, auditEvents, devices, type Db } from "@hshelby/db";
 import { and, desc, eq, isNull } from "drizzle-orm";
 import { Hono } from "hono";
 import type { AppEnv, Deps } from "../context";
@@ -25,21 +25,23 @@ const toDto = (a: AppRow): AppDto => ({
   createdAt: a.createdAt.toISOString(),
 });
 
+/** Every lookup is scoped to the active organization; other orgs' apps are simply "not found". */
+export async function findOrgApp(db: Db, orgId: string, id: string) {
+  if (!isUuid(id)) throw notFound("App");
+  const [row] = await db
+    .select()
+    .from(apps)
+    .where(and(eq(apps.id, id), eq(apps.organizationId, orgId), isNull(apps.deletedAt)))
+    .limit(1);
+  if (!row) throw notFound("App");
+  return row;
+}
+
 export function appRoutes(deps: Deps) {
   const { db } = deps;
   const r = new Hono<AppEnv>();
 
-  /** Every lookup is scoped to the active organization; other orgs' apps are simply "not found". */
-  async function findApp(orgId: string, id: string) {
-    if (!isUuid(id)) throw notFound("App");
-    const [row] = await db
-      .select()
-      .from(apps)
-      .where(and(eq(apps.id, id), eq(apps.organizationId, orgId), isNull(apps.deletedAt)))
-      .limit(1);
-    if (!row) throw notFound("App");
-    return row;
-  }
+  const findApp = (orgId: string, id: string) => findOrgApp(db, orgId, id);
 
   r.get("/", async (c) => {
     const rows = await db

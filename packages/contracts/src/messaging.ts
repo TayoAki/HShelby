@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { IdentityLabels, IdentityToken, Metadata, SdkIdentity } from "./identity";
+import { DevicePush, PushRegistration } from "./push";
 
 /* ---------- shared ---------- */
 
@@ -54,6 +55,8 @@ const DeviceState = {
   identity: IdentityLabels.optional(),
   identityToken: IdentityToken.optional(),
   metadata: Metadata.optional(),
+  /** null clears the token (e.g. notifications were turned off). */
+  push: PushRegistration.nullable().optional(),
 };
 
 export const RegisterDeviceInput = z
@@ -143,6 +146,7 @@ export const InboxDevice = z.object({
   metadata: z.record(z.string(), z.string()),
   /** The user logged out of this device: replies stay in the history but won't reach them. */
   signedOutAt: z.string().nullable(),
+  push: DevicePush,
 });
 export type InboxDevice = z.infer<typeof InboxDevice>;
 

@@ -6,6 +6,7 @@ import { billingEnabled, loadEnv } from "./env";
 const env = loadEnv();
 const { deps, pool } = createDeps(env);
 const app = createApp(deps);
+await deps.jobs.start();
 
 let server: ServerType;
 
@@ -24,7 +25,8 @@ listen("::");
 for (const signal of ["SIGTERM", "SIGINT"] as const) {
   process.on(signal, () => {
     deps.logger.info({ signal }, "shutting down");
-    server.close(() => void pool.end().finally(() => process.exit(0)));
+    deps.apns.close();
+    server.close(() => void Promise.allSettled([deps.jobs.stop(), pool.end()]).finally(() => process.exit(0)));
     setTimeout(() => process.exit(1), 10_000).unref();
   });
 }

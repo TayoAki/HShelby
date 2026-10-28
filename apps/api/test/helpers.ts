@@ -1,6 +1,7 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import type { AppStoreResult } from "@hshelby/contracts";
 import type { AppStoreClient } from "@hshelby/core";
+import { members } from "@hshelby/db";
 import { expect } from "vitest";
 import { createApp } from "../src/app";
 import { createDeps } from "../src/deps";
@@ -28,7 +29,8 @@ export const fakeAppStore: AppStoreClient & { results: AppStoreResult[] } = {
   },
 };
 
-export function makeTestApp() {
+/** The API against the test database, with its job queue started. Pass `apns` to use a fake APNs. */
+export async function makeTestApp(overrides: Parameters<typeof createDeps>[1] = {}) {
   const env = loadEnv({
     NODE_ENV: "test",
     DATABASE_URL: process.env.TEST_DATABASE_URL ?? "postgres://postgres@localhost:5433/hshelby_test",
@@ -37,11 +39,17 @@ export function makeTestApp() {
     ENC_KEYS: `v1:${randomBytes(32).toString("base64")}`,
     PUBLIC_API_URL: "https://api.test",
   });
-  const { deps, pool } = createDeps(env, { appStore: fakeAppStore });
-  return { app: createApp(deps), deps, pool };
+  const { deps, pool } = createDeps(env, { appStore: fakeAppStore, ...overrides });
+  await deps.jobs.start();
+  const close = async () => {
+    deps.apns.close();
+    await deps.jobs.stop();
+    await pool.end();
+  };
+  return { app: createApp(deps), deps, close };
 }
 
-type TestApp = ReturnType<typeof makeTestApp>["app"];
+type TestApp = Awaited<ReturnType<typeof makeTestApp>>["app"];
 
 /** Signs up a fresh user and returns a fetch helper that sends their session cookie. */
 export async function signUp(app: TestApp, name = "Ada Lovelace") {
@@ -100,3 +108,18 @@ export async function registerDevice(app: TestApp, publicId: string, extra: Reco
 
 export const reply = (call: TeamCall, conversationId: string, text: string, clientId = randomUUID()) =>
   call(`/api/conversations/${conversationId}/messages`, { method: "POST", body: JSON.stringify({ clientId, text }) });
+
+/** Adds a second user to the owner's workspace as a plain member, active on it. */
+export async function joinAsMember(app: TestApp, deps: Awaited<ReturnType<typeof makeTestApp>>["deps"], ownerCall: TeamCall) {
+  const { organization } = (await (await ownerCall("/api/me")).json()) as { organization: { id: string } };
+  const member = await signUp(app, "Mary Member");
+  const { user } = (await (await member.call("/api/me")).json()) as { user: { id: string } };
+  await deps.db.insert(members).values({ id: randomUUID(), organizationId: organization.id, userId: user.id, role: "member" });
+  const res = await member.call("/api/auth/organization/set-active", {
+    method: "POST",
+    headers: { origin: ORIGIN },
+    body: JSON.stringify({ organizationId: organization.id }),
+  });
+  expect(res.status).toBe(200);
+  return member;
+}

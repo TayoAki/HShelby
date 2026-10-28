@@ -5,12 +5,13 @@ npm-workspaces monorepo. Node 22.
 | Path | What |
 |---|---|
 | `apps/api` | Hono API: Better Auth at `/api/auth/*`, org-scoped `/api/*`, SDK `/v1/*` later. Tests hit a real Postgres. |
-| `apps/worker` | pg-boss jobs and cron (nightly cleanup). |
+| `apps/worker` | pg-boss jobs: `push.send`, nightly cleanup, deleted-app purge. Needs `DATABASE_URL` and `ENC_KEYS`. |
 | `apps/dashboard` | Next.js dashboard. Proxies `/api/*` to the API (`API_INTERNAL_URL`), so auth cookies stay first-party. |
 | `apps/web` | Landing-page study clone. Not deployed (it carries another company's brand). |
 | `packages/db` | Drizzle schema + SQL migrations (`npm run db:generate` after schema changes). |
 | `packages/contracts` | Zod request/response schemas and error codes shared by API and dashboard. |
 | `packages/core` | IDs, secret encryption, App Store client, setup-prompt template. |
+| `packages/push` | APNs client, notification content and delivery (shared by API "Send test" and the worker); `@hshelby/push/testing` has a fake APNs. |
 | `packages/ui` | Phone frame and chat mock shared by web and dashboard. |
 
 - Local Postgres for tests: `TEST_DATABASE_URL` (default `postgres://postgres@localhost:5433/hshelby_test`).

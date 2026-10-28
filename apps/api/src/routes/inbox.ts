@@ -37,6 +37,12 @@ const toInboxDevice = (d: DeviceRow): InboxDevice => ({
   verifiedAt: d.verifiedAt?.toISOString() ?? null,
   metadata: d.metadata,
   signedOutAt: d.signedOutAt?.toISOString() ?? null,
+  push: {
+    enabled: Boolean(d.pushToken) && !d.signedOutAt,
+    environment: d.pushEnv,
+    issue: d.pushIssue,
+    issueAt: d.pushIssueAt?.toISOString() ?? null,
+  },
 });
 
 /** ILIKE pattern for a literal substring. */
@@ -154,7 +160,7 @@ export function conversationRoutes(deps: Deps) {
     const id = c.req.param("id");
     if (!isUuid(id)) throw notFound("Conversation");
     const user = c.get("user");
-    const result = await appendAgentMessage(db, {
+    const result = await appendAgentMessage(db, deps.jobs, {
       organizationId: c.get("org").id,
       conversationId: id,
       authorUserId: user.id,

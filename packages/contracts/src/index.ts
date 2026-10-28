@@ -24,6 +24,8 @@ export const errorCodes = [
   "identity_mismatch",
   "verification_required",
   "delete_failed",
+  "push_not_configured",
+  "invalid_push_key",
   "internal_error",
 ] as const;
 export type ErrorCode = (typeof errorCodes)[number];
@@ -113,3 +115,4 @@ export type BillingConfig = z.infer<typeof BillingConfig>;
 
 export * from "./identity";
 export * from "./messaging";
+export * from "./push";

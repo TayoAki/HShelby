@@ -6,7 +6,9 @@
   "dependencies": {
     "@hshelby/core": "*",
     "@hshelby/db": "*",
+    "@hshelby/push": "*",
     "drizzle-orm": "0.45.4",
+    "jose": "^6.2.13",
     "pg": "^8.23.1",
     "pg-boss": "^12.38.0",
     "pino": "^9.14.0"

@@ -1,6 +1,6 @@
 import type { MessagePageQuery } from "@hshelby/contracts";
 import { uuidv7 } from "@hshelby/core";
-import { apps, conversations, messages, users, type Db } from "@hshelby/db";
+import { apps, conversations, messages, users, type Db, type Tx } from "@hshelby/db";
 import { and, asc, count, desc, eq, gt, isNull, lt, sql } from "drizzle-orm";
 import { ApiError, isUniqueViolation, notFound } from "./errors";
 
@@ -10,7 +10,8 @@ import { ApiError, isUniqueViolation, notFound } from "./errors";
  *      appends to a conversation, and the new last_seq is the message's seq. No gaps, no reordering.
  *   2. INSERT the message. A resent clientId violates a unique index, the whole transaction rolls back
  *      (seq included), and the caller gets the stored message instead of a duplicate.
- * Phase B3 enqueues push inside the same transaction, so a rolled-back message never notifies anyone.
+ * A teammate's reply also enqueues its push inside the transaction, so a rolled-back message never
+ * notifies anyone.
  */
 
 export type MessageRow = typeof messages.$inferSelect;
@@ -87,9 +88,10 @@ export async function appendUserMessage(
   }
 }
 
-/** Appends a teammate's reply to a conversation of their organization. */
+/** Appends a teammate's reply to a conversation of their organization and enqueues its push. */
 export async function appendAgentMessage(
   db: Db,
+  jobs: { pushMessage(tx: Tx, messageId: string): Promise<void> },
   input: { organizationId: string; conversationId: string; authorUserId: string; clientId: string; text: string },
 ): Promise<Appended> {
   const replay = await findAgentReplay(db, input);
@@ -131,6 +133,7 @@ export async function appendAgentMessage(
           text: input.text,
         })
         .returning();
+      await jobs.pushMessage(tx, message!.id);
       return { message: message!, conversation, created: true };
     });
   } catch (err) {

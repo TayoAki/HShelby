@@ -9,6 +9,7 @@ import { requireOrg, requireSession } from "./middleware";
 import { accountRoutes } from "./routes/account";
 import { appRoutes } from "./routes/apps";
 import { conversationRoutes, deviceRoutes } from "./routes/inbox";
+import { pushRoutes } from "./routes/push";
 import { sdkRoutes } from "./routes/sdk";
 
 export function createApp(deps: Deps) {
@@ -46,6 +47,7 @@ export function createApp(deps: Deps) {
   api.use("*", requireSession(deps), requireOrg(deps));
   api.route("/", accountRoutes(deps));
   api.route("/apps", appRoutes(deps));
+  api.route("/apps", pushRoutes(deps));
   api.route("/conversations", conversationRoutes(deps));
   api.route("/devices", deviceRoutes(deps));
   app.route("/api", api);

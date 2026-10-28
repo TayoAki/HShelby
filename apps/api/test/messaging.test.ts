@@ -6,8 +6,8 @@ import { SignJWT } from "jose";
 import { afterAll, describe, expect, it } from "vitest";
 import { makeTestApp, registerDevice, reply, workspaceWithApp as workspaceIn } from "./helpers";
 
-const { app, deps, pool } = makeTestApp();
-afterAll(() => pool.end());
+const { app, deps, close } = await makeTestApp();
+afterAll(close);
 
 const workspaceWithApp = (name?: string) => workspaceIn(app, name);
 

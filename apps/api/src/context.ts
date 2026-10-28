@@ -1,8 +1,10 @@
 import type { AppStoreClient, Keyring } from "@hshelby/core";
 import type { Db, devices } from "@hshelby/db";
+import type { ApnsClient } from "@hshelby/push";
 import type { Logger } from "pino";
 import type { Auth } from "./auth";
 import type { Env } from "./env";
+import type { Jobs } from "./jobs";
 
 export type Deps = {
   db: Db;
@@ -13,6 +15,9 @@ export type Deps = {
   appStore: AppStoreClient;
   /** HS256 key for SDK access tokens. */
   deviceTokenKey: Uint8Array;
+  jobs: Jobs;
+  /** For "Send test"; regular pushes go out from the worker. */
+  apns: ApnsClient;
 };
 
 type SessionResult = NonNullable<Awaited<ReturnType<Auth["api"]["getSession"]>>>;
