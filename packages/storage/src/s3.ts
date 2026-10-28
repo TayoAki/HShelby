@@ -90,8 +90,9 @@ export function createStorage(config: StorageConfig) {
       return { url, headers: { "content-type": input.contentType } };
     },
 
-    presignDownload: (key: string, expiresIn: number) =>
-      getSignedUrl(s3, new GetObjectCommand({ Bucket, Key: key }), { expiresIn }),
+    /** A GET link. `contentType` overrides the type stored with the object, which the uploader chose. */
+    presignDownload: (key: string, expiresIn: number, contentType?: string) =>
+      getSignedUrl(s3, new GetObjectCommand({ Bucket, Key: key, ResponseContentType: contentType }), { expiresIn }),
 
     /** The object's bytes, at most `maxBytes + 1` of them (so an oversized object shows as such), or null if it's missing. */
     async read(key: string, maxBytes: number): Promise<Buffer | null> {

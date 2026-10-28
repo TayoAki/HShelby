@@ -18,7 +18,11 @@ const HOUR = 60 * 60 * 1000;
 type Device = Awaited<ReturnType<typeof registerDevice>>;
 
 /** The SDK's upload: ask for a ticket describing `declared`, then PUT `actual` (normally the same bytes). */
-async function upload(device: Device, declared: Buffer, options: { actual?: Buffer | null; contentType?: string; width?: number; height?: number } = {}) {
+async function upload(
+  device: Device,
+  declared: Buffer,
+  options: { actual?: Buffer | null; contentType?: string; width?: number; height?: number; putHeaders?: Record<string, string> } = {},
+) {
   const res = await device.sdk("/v1/uploads", {
     json: {
       contentType: options.contentType ?? "image/png",
@@ -32,7 +36,7 @@ async function upload(device: Device, declared: Buffer, options: { actual?: Buff
   const ticket = (await res.json()) as any;
   const actual = options.actual === undefined ? declared : options.actual;
   if (actual) {
-    const put = await fetch(ticket.uploadUrl, { method: ticket.method, headers: ticket.headers, body: actual });
+    const put = await fetch(ticket.uploadUrl, { method: ticket.method, headers: { ...ticket.headers, ...options.putHeaders }, body: actual });
     expect(put.status).toBe(200);
   }
   return ticket.attachmentId as string;
@@ -86,6 +90,14 @@ describe("user photos", () => {
     expect(res.status).toBe(422);
     expect(((await res.json()) as any).error.code).toBe("invalid_attachment");
     expect(((await (await device.sdk("/v1/conversation")).json()) as any).conversation).toBeNull();
+  });
+
+  it("serves a photo as the type the server checked, whatever the upload claimed", async () => {
+    const { publicId } = await workspaceWithApp(app);
+    const device = await registerDevice(app, publicId);
+    const id = await upload(device, pngBytes(10, 10, 100), { putHeaders: { "content-type": "text/html" } });
+    const { message } = (await (await sendPhotos(device, [id])).json()) as any;
+    expect((await fetch(message.attachments[0].url)).headers.get("content-type")).toBe("image/png");
   });
 
   it("asks for the upload when it hasn't happened yet, and accepts the retry", async () => {

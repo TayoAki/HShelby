@@ -111,7 +111,7 @@ export async function linkAttachments(
 export async function toAttachment(storage: Storage, row: AttachmentRow): Promise<Attachment> {
   return {
     id: row.id,
-    url: await storage.presignDownload(row.objectKey, DOWNLOAD_URL_SECONDS),
+    url: await storage.presignDownload(row.objectKey, DOWNLOAD_URL_SECONDS, row.contentType),
     contentType: row.contentType,
     width: row.width,
     height: row.height,
