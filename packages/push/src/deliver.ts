@@ -1,4 +1,4 @@
-import type { PushEnvironment } from "@hshelby/contracts";
+import { isInChat, type PushEnvironment } from "@hshelby/contracts";
 import { decryptSecret, type Keyring } from "@hshelby/core";
 import { apps, conversations, devices, messages, pushConfigs, users, type Db } from "@hshelby/db";
 import { and, desc, eq, isNotNull, isNull, sql } from "drizzle-orm";
@@ -64,12 +64,15 @@ export async function recordOutcome(
   return outcome;
 }
 
-/** Sends the push for one teammate reply, if the app and the device are set up for it. */
+/**
+ * Sends the push for one teammate reply, if the app and the device are set up for it. A user who has the
+ * chat open sees the reply arrive there, so they get no push ("in_chat").
+ */
 export async function deliverMessagePush(
   deps: PushDeps,
   messageId: string,
   { lastAttempt }: { lastAttempt: boolean },
-): Promise<PushOutcome | "skipped"> {
+): Promise<PushOutcome | "skipped" | "in_chat"> {
   const [row] = await deps.db
     .select({
       message: messages,
@@ -90,6 +93,7 @@ export async function deliverMessagePush(
   const device = row?.device;
   if (!row || !row.config || row.message.sender !== "agent") return "skipped";
   if (!device?.pushToken || !device.pushEnv || device.signedOutAt) return "skipped";
+  if (isInChat(device)) return "in_chat";
 
   const result = await deps.apns.send(credentials(row.config, deps.keyring), device.pushEnv, {
     deviceToken: device.pushToken,

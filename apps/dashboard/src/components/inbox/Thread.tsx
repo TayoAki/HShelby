@@ -3,6 +3,7 @@
 import {
   MESSAGE_MAX_LENGTH,
   PHOTO_LIMITS,
+  TYPING_TTL_MS,
   type Attachment,
   type InboxConversation,
   type InboxMessage,
@@ -16,6 +17,7 @@ import { AppIcon, ErrorNote, Spinner } from "@/components/ui";
 import { api, ApiError, apiForm } from "@/lib/api";
 import { authClient } from "@/lib/auth-client";
 import { useBilling } from "@/lib/billing";
+import { sendLive, useLive, useLiveConnected } from "@/lib/live";
 import { preparePhoto } from "@/lib/photos";
 import { clockTime, dayLabel, localTimeIn, relativeTime, sameDay } from "@/lib/time";
 import { isAdmin, useMe } from "@/lib/use-me";
@@ -88,6 +90,10 @@ export function Thread({ conversationId }: { conversationId: string }) {
   const scroller = useRef<HTMLDivElement>(null);
   const stickToBottom = useRef(true);
   const restoreFromHeight = useRef<number | null>(null);
+  const live = useLiveConnected();
+  /** Who's typing in this conversation right now: the user, or another teammate. */
+  const [typing, setTyping] = useState<{ label: string; until: number } | null>(null);
+  const lastTypingSent = useRef(0);
 
   const lastSeq = useMemo(() => items.reduce((max, m) => (m.state ? max : Math.max(max, m.seq)), 0), [items]);
   const base = `/conversations/${conversationId}`;
@@ -105,18 +111,53 @@ export function Thread({ conversationId }: { conversationId: string }) {
       });
   }, [base]);
 
-  // New messages from the user: fetch what's after the last seq, then the conversation's fresh counters.
-  useVisibleInterval(() => {
+  const reloadConversation = () =>
+    api<{ conversation: InboxConversation }>(base)
+      .then((c) => setConversation(c.conversation))
+      .catch(() => {});
+
+  /** Fetches messages after the last seq, then the conversation's fresh counters. */
+  function catchUp(always = false) {
     if (!conversation) return;
     api<InboxThread>(`${base}/messages?after=${lastSeq}&limit=100`)
       .then(async (t) => {
-        if (t.messages.length === 0) return;
-        setItems((current) => merge(current, t.messages));
-        const c = await api<{ conversation: InboxConversation }>(base);
-        setConversation(c.conversation);
+        if (t.messages.length > 0) setItems((current) => merge(current, t.messages));
+        if (t.messages.length > 0 || always) await reloadConversation();
       })
       .catch(() => {});
-  }, 3000);
+  }
+
+  // Live updates do the work; polling is the fallback, and slows right down while the socket is up.
+  useVisibleInterval(() => catchUp(), live ? 30_000 : 3000);
+  useLive((event) => {
+    if (event.type === "ready" || event.type === "resync") return catchUp(true);
+    if (event.conversationId !== conversationId) return;
+    if (event.type === "message") {
+      if (event.sender === "user") setTyping(null);
+      catchUp();
+    } else if (event.type === "conversation") {
+      void reloadConversation();
+    } else if (event.type === "presence") {
+      setConversation((c) =>
+        c && { ...c, device: { ...c.device, inChat: event.inChat, lastSeenInChatAt: new Date().toISOString() } },
+      );
+    } else if (event.type === "typing" && conversation) {
+      const who = event.sender === "user" ? deviceLabel(conversation.device) : (event.name ?? "A teammate");
+      setTyping({ label: `${who} is typing…`, until: Date.now() + TYPING_TTL_MS });
+    }
+  });
+  useEffect(() => {
+    if (!typing) return;
+    const id = setTimeout(() => setTyping(null), typing.until - Date.now());
+    return () => clearTimeout(id);
+  }, [typing]);
+
+  /** Lets the user see a teammate typing; at most every 2 seconds. */
+  function notifyTyping() {
+    if (Date.now() - lastTypingSent.current < 2000) return;
+    lastTypingSent.current = Date.now();
+    sendLive({ type: "typing", conversationId });
+  }
 
   // Viewing the conversation reads it.
   useEffect(() => {
@@ -301,6 +342,12 @@ export function Thread({ conversationId }: { conversationId: string }) {
             <p className="flex items-center gap-1.5 text-[16px]">
               <span className="truncate">{deviceLabel(device)}</span>
               <IdentityBadge device={device} />
+              {device.inChat && (
+                <span className="flex shrink-0 items-center gap-1 rounded-full bg-[#e8f7ee] px-2 py-0.5 text-[11px] text-[#14773a]">
+                  <span className="size-1.5 rounded-full bg-[#22a355]" />
+                  In chat
+                </span>
+              )}
             </p>
             <p className="truncate text-[13px] text-secondary">
               {[device.name && device.email, app.name, device.model ?? "iOS device", !open && "Resolved"].filter(Boolean).join(" · ")}
@@ -379,6 +426,9 @@ export function Thread({ conversationId }: { conversationId: string }) {
           })}
         </div>
 
+        <p aria-live="polite" className="h-5 px-6 text-[12px] text-secondary">
+          {typing?.label}
+        </p>
         {error && (
           <div className="px-5 pb-2">
             <ErrorNote>{error}</ErrorNote>
@@ -432,7 +482,10 @@ export function Thread({ conversationId }: { conversationId: string }) {
               </button>
               <textarea
                 value={draft}
-                onChange={(e) => setDraft(e.target.value)}
+                onChange={(e) => {
+                  setDraft(e.target.value);
+                  if (e.target.value.trim()) notifyTyping();
+                }}
                 onKeyDown={(e) => {
                   if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) submit(e);
                 }}
@@ -493,6 +546,10 @@ export function Thread({ conversationId }: { conversationId: string }) {
           <Detail label="Time zone" value={device.timezone} />
           <Detail label="First seen" value={relativeTime(device.createdAt)} />
           <Detail label="Last active" value={device.lastSeenAt ? relativeTime(device.lastSeenAt) : null} />
+          <Detail
+            label="Chat open"
+            value={device.inChat ? "Now" : device.lastSeenInChatAt ? relativeTime(device.lastSeenInChatAt) : null}
+          />
           <Detail
             label="Notifications"
             value={device.push.enabled ? (device.push.environment === "sandbox" ? "On · Sandbox" : "On · Production") : "Off"}

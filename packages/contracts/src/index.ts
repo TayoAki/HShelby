@@ -114,3 +114,4 @@ export * from "./identity";
 export * from "./messaging";
 export * from "./photos";
 export * from "./push";
+export * from "./realtime";

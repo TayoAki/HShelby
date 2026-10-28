@@ -4,7 +4,8 @@
  *   npx tsx apps/api/scripts/sdk-sim.ts --app app_… --api http://localhost:8080 --say "Hello" --chat
  *
  * --say TEXT        send a message (repeatable)
- * --chat            keep running: type lines to send them; team replies print as they arrive
+ * --chat            keep running: type lines to send them; team replies and typing print as they arrive
+ *                   (over the live WebSocket, with "In chat" heartbeats; polling only while it's down)
  * --user-id/--name/--email   identify() labels (unverified)
  * --verified        also send an identity token for those values, signed with $IDENTITY_SECRET the way the
  *                   developer's server would (env var, so the secret stays out of shell history)
@@ -20,20 +21,24 @@
  */
 import { createHash, randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { createInterface } from "node:readline";
+import { createInterface, emitKeypressEvents } from "node:readline";
 import { parseArgs } from "node:util";
-import type {
-  AccessToken,
-  DeviceSession,
-  DeviceUpdateResult,
-  SdkIdentity,
-  SdkMessage,
-  SdkSendResult,
-  SdkSync,
-  UploadTicket,
+import {
+  LIVE_HEARTBEAT_MS,
+  TYPING_TTL_MS,
+  type AccessToken,
+  type DeviceSession,
+  type DeviceUpdateResult,
+  type SdkIdentity,
+  type SdkLiveEvent,
+  type SdkMessage,
+  type SdkSendResult,
+  type SdkSync,
+  type UploadTicket,
 } from "@hshelby/contracts";
 import { inspectImage } from "@hshelby/storage";
 import { SignJWT } from "jose";
+import WebSocket from "ws";
 
 const { values: args } = parseArgs({
   options: {
@@ -241,9 +246,49 @@ for (const text of args.say) {
 
 if (args.photo.length > 0) await sendPhotos(args.photo, args.caption);
 
+/** The SDK's live connection while the chat is open: events trigger a sync; polling covers the gaps. */
+let socket: WebSocket | null = null;
+function goLive() {
+  const ws = new WebSocket(`${api.replace(/^http/, "ws")}/v1/live`, { headers: { authorization: `Bearer ${accessToken}` } });
+  socket = ws;
+  let heartbeat: NodeJS.Timeout | undefined;
+  let typingShownAt = 0;
+  ws.on("open", () => (heartbeat = setInterval(() => ws.send(JSON.stringify({ type: "heartbeat" })), LIVE_HEARTBEAT_MS)));
+  ws.on("message", (data) => {
+    const event = JSON.parse(String(data)) as SdkLiveEvent;
+    if (event.type === "typing") {
+      if (Date.now() - typingShownAt > TYPING_TTL_MS) console.log(` team │ (${event.name ?? "someone"} is typing…)`);
+      typingShownAt = Date.now();
+    } else if (event.type === "read") {
+      console.log("       (seen by the team)");
+    } else {
+      sync().catch((err: unknown) => console.error(String(err)));
+    }
+  });
+  ws.on("error", () => {});
+  ws.on("close", (code) => {
+    socket = null;
+    clearInterval(heartbeat);
+    // a closed or refused socket usually means the access token expired: refresh, then reconnect
+    setTimeout(() => refresh().then(goLive, () => setTimeout(goLive, 5000)), code === 4001 ? 0 : 2000);
+  });
+}
+
 if (args.chat) {
   console.log("Chatting: type a message and press Enter. Ctrl+C to quit.");
-  setInterval(() => sync().catch((err: unknown) => console.error(String(err))), 3000);
+  goLive();
+  setInterval(() => {
+    if (socket?.readyState !== WebSocket.OPEN) sync().catch((err: unknown) => console.error(String(err)));
+  }, 3000);
+  let typingSentAt = 0;
+  if (process.stdin.isTTY) {
+    emitKeypressEvents(process.stdin);
+    process.stdin.on("keypress", () => {
+      if (Date.now() - typingSentAt < 2000 || socket?.readyState !== WebSocket.OPEN) return;
+      typingSentAt = Date.now();
+      socket.send(JSON.stringify({ type: "typing" }));
+    });
+  }
   createInterface({ input: process.stdin }).on("line", (line) => {
     const text = line.trim();
     if (text) send(text).catch((err: unknown) => console.error(String(err)));

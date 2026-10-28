@@ -155,6 +155,10 @@ export const InboxDevice = z.object({
   /** The user logged out of this device: replies stay in the history but won't reach them. */
   signedOutAt: z.string().nullable(),
   push: DevicePush,
+  /** The chat is open in the app right now (phase B6). */
+  inChat: z.boolean(),
+  /** When the user last had the chat open. */
+  lastSeenInChatAt: z.string().nullable(),
 });
 export type InboxDevice = z.infer<typeof InboxDevice>;
 

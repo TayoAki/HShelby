@@ -1,5 +1,6 @@
 import {
   InboxListQuery,
+  isInChat,
   MessagePageQuery,
   ReadInput,
   SendMessageInput,
@@ -16,6 +17,7 @@ import type { AppEnv, Deps } from "../context";
 import { ApiError, notFound } from "../errors";
 import { appendAgentMessage, markTeamRead, pageMessages, type ConversationRow, type PagedMessage } from "../messaging";
 import { requireOrgAdmin } from "../middleware";
+import { publishLive } from "../realtime/events";
 import {
   attachmentsByMessage,
   checkImage,
@@ -53,6 +55,8 @@ const toInboxDevice = (d: DeviceRow): InboxDevice => ({
     issue: d.pushIssue,
     issueAt: d.pushIssueAt?.toISOString() ?? null,
   },
+  inChat: isInChat(d),
+  lastSeenInChatAt: d.lastSeenInChatAt?.toISOString() ?? null,
 });
 
 /** ILIKE pattern for a literal substring. */
@@ -248,10 +252,11 @@ export function conversationRoutes(deps: Deps) {
             .update(conversations)
             .set({ status, updatedAt: new Date() })
             .where(and(eq(conversations.id, id), eq(conversations.organizationId, c.get("org").id)))
-            .returning({ status: conversations.status })
+            .returning({ status: conversations.status, deviceId: conversations.deviceId })
         : [];
       if (!row) throw notFound("Conversation");
-      return c.json(row);
+      await publishLive(db, { type: "conversation", organizationId: c.get("org").id, conversationId: id, deviceId: row.deviceId });
+      return c.json({ status: row.status });
     });
   }
 
@@ -292,6 +297,11 @@ export function deviceRoutes(deps: Deps) {
             action: `device.${action}ed`,
             target: id,
           });
+          const [conversation] = await tx
+            .select({ id: conversations.id })
+            .from(conversations)
+            .where(and(eq(conversations.deviceId, id), isNull(conversations.supersededAt)));
+          if (conversation) await publishLive(tx, { type: "conversation", organizationId: org.id, conversationId: conversation.id, deviceId: id });
         }
         return row;
       });

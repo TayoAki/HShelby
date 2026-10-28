@@ -27,7 +27,7 @@ Why one Postgres for everything at the start: messages, the job queue, realtime 
 
 ## Status
 
-**B0–B5 run on Railway staging** (billing is switched off there until Stripe test keys are set) (project `hshelby`, environment `staging`): dashboard at `https://dashboard-staging-0dee.up.railway.app`, API at `https://api-staging-f8f8.up.railway.app`.
+**B0–B6 run on Railway staging** (billing is switched off there until the Stripe test secret key is set) (project `hshelby`, environment `staging`): dashboard at `https://dashboard-staging-0dee.up.railway.app`, API at `https://api-staging-f8f8.up.railway.app`.
 
 B1 (messaging core) as built:
 
@@ -37,7 +37,7 @@ B1 (messaging core) as built:
 - **Inbox API** (`apps/api/src/routes/inbox.ts`): conversations list (status/app filters, keyset cursor), detail, thread paging, reply, read, resolve/reopen, device block/unblock (audited). `conversations.organization_id` is denormalized from the app for the inbox index.
 - **Dashboard:** `/inbox` with a polled list and thread (optimistic replies, resolve, block, device details). Onboarding's "waiting for your first message" completes on the first real message.
 - **Try it without an app:** `npx tsx apps/api/scripts/sdk-sim.ts --app app_… --api <api url> --say "Hello" --chat` plays the SDK.
-- **Deferred to their phases:** realtime (B6; polling until then), rate limits on `POST /v1/devices` (B12).
+- **Deferred to their phases:** rate limits on `POST /v1/devices` (B12).
 
 B4 (identity and deletion) as built:
 
@@ -60,7 +60,7 @@ B3 (push) as built:
 - **APNs answers:** 410 drops the token; device rejections (BadDeviceToken, DeviceTokenNotForTopic) are kept as the device's push issue; key rejections (403, BadTopic) flag the app's settings; 429/5xx/timeouts retry with exponential backoff (5 retries) and are recorded on the last attempt. A delivery clears earlier issues.
 - **Dashboard:** app Settings has a Push notifications card: `.p8` upload (validated, stored encrypted, never returned; the Key ID is read from Apple's file name), Key/Team/Bundle IDs, templates with a live preview, "Send test" to up to 10 recent devices with per-device results, and remove. Device details show notification status and the last push issue. Changes are admin-only and audited.
 - **Not verified here:** delivery to a real iPhone. That needs an Apple key and a device; everything up to Apple's servers is tested against the fake APNs.
-- **Deferred:** per-language templates, skipping pushes while the user is in the chat (needs B6 presence), offer-card pushes (B7).
+- **Deferred:** per-language templates, offer-card pushes (B7). (Skipping the push while the user is in the chat came with B6.)
 
 B2 (photos) as built:
 
@@ -85,7 +85,19 @@ B5 (billing) as built:
 - **Backstop:** the plugin answers 200 even when applying a webhook fails, so the worker's hourly `billing.sync` re-reads every subscription Stripe may still change and fixes rows that drifted. It needs `STRIPE_SECRET_KEY` on the worker.
 - **Dashboard:** a Billing page (plan, renewal or end date, a past-due notice and "Manage billing", or else the offer with the founder counter and Subscribe), an inbox banner while unsubscribed or past due, a composer that says why it's locked (and marks the setup conversation), "Add app" leading to Billing when locked, and the onboarding Subscribe step showing the live offer.
 - **Tests** run the real plugin against a fake Stripe (`@hshelby/billing/testing`): checkout and webhooks turn replies on; cancel-at-period-end and past-due keep them on; the end turns them off while the user's messages keep arriving; the return from Checkout works without the webhook; the plan, admin and founder-cap guards; a forged webhook is refused; the sync job fixes missed changes. A browser walkthrough runs the same loop through the fake's Checkout and portal pages.
-- **Not verified here:** real Stripe test mode. That needs a Stripe sandbox for this project with a product, four prices and a webhook endpoint.
+- **Staging Stripe:** the shared "UGC Mediakits" sandbox has a product `hshelby (staging)` with the four prices and a webhook endpoint for the staging API (API version `2026-04-22.dahlia`); their IDs and the webhook secret are set on the api service. Billing switches on once that sandbox's secret key is set as `STRIPE_SECRET_KEY` on the api service (the worker references it). The sandbox is shared, so the endpoint also receives other projects' subscription events; the plugin ignores prices it doesn't know.
+
+B6 (realtime) as built:
+
+- **Endpoints:** `GET /v1/live` (SDK; access token in the `Authorization` header) and `GET /api/live` (dashboard; session cookie, and only from the dashboard's own origin, since browsers send cookies on cross-site WebSocket handshakes) upgrade to WebSocket on the API's port (`apps/api/src/realtime/gateway.ts`). The dashboard connects to its own origin; Next's rewrite proxies the upgrade to the API.
+- **Events, not data** (`packages/contracts/src/realtime.ts`): `message {seq}`, `read {seq}` and `typing` to the SDK; `message`, `conversation` (status or read state changed), `typing` and `presence` to dashboards. Every connection starts with `ready`; `resync` means events may have been missed. Either way clients catch up once with `after=seq`.
+- **Fan-out:** messages, reads and status changes publish `pg_notify('rt', …)` inside their own transactions, so nothing is announced before it commits and a rolled-back change never is. Every instance keeps one connection that LISTENs and routes events to its sockets: dashboards by organization, the SDK by device. If that connection drops, it reconnects with backoff and tells every socket to resync. `realtime/fanout.ts` is the only file to change for Redis pub/sub.
+- **Typing:** relayed through the same channel, never stored, throttled to one event per 2 s per sender, and never echoed to the teammate typing. A typing indicator lasts 5 s.
+- **In chat:** the SDK's socket is open only while the chat is on screen. Opening sets `devices.chat_open`; heartbeats (the SDK's every 15 s, and the server's pings) refresh `last_seen_in_chat_at` at most every 20 s; closing clears it. "In chat" means open and seen within 45 s, so a crashed instance's sockets stop counting on their own. The worker **skips the push** for a reply to a device that's in chat (`in_chat` outcome).
+- **Safety:** 4 KB message limit, 40 messages per 10 s per socket, pings every 15 s to drop dead connections. SDK sockets close with 4001 after 15 minutes (the access token's lifetime) and dashboard sockets after an hour, so credentials are rechecked on reconnect: a logged-out or deleted device can't stay connected.
+- **Dashboard:** one socket per tab with reconnect and backoff. The inbox and the open thread update live; polling drops to every 30 s while the socket is up (3–5 s otherwise). It shows "In chat" badges, "Chat open" in the device details, and typing both ways.
+- **Simulator:** `--chat` uses the live socket (heartbeats, typing on keypress, team typing and read receipts printed) and polls only while it's down.
+- **Done-when test** (`apps/api/test/realtime.test.ts`): two API instances on one database; a reply sent through A reaches a dashboard socket and the user's socket on B in 17–19 ms locally, including the HTTP request and the transaction (the target is under 300 ms). The same file covers read receipts, workspace isolation, resync after a dropped listener, typing, presence and refused credentials.
 
 Where B0 differs from the plan below:
 
@@ -417,7 +429,7 @@ Each phase ends with acceptance tests that must pass in CI and on staging.
 | **B4 Identity & deletion** (done, see Status) | `identify` labels, metadata limits, JWT verification, only-verified mode, logout/delete + `purge.scope` | JWT test vectors from the docs pass; a deleted device's rows and objects are gone | 1 wk |
 | **B5 Billing** (built; real Stripe test mode pending, see Status) | Stripe Checkout/Portal/webhooks, gating middleware, founder-spot counter | Test-mode subscription toggles reply access; users can still send while lapsed | 0.5–1 wk |
 | **MVP backend** | | | **≈ 6–7 wks** |
-| **B6 Realtime** | WS gateway, LISTEN/NOTIFY fan-out, typing, presence, skip-push-when-in-chat | Two API instances: a reply sent via instance A reaches a socket on B in < 300 ms | 1–1.5 wks |
+| **B6 Realtime** (done, see Status) | WS gateway, LISTEN/NOTIFY fan-out, typing, presence, skip-push-when-in-chat | Two API instances: a reply sent via instance A reaches a socket on B in < 300 ms | 1–1.5 wks |
 | **B7 Cards** | Review + offer cards, paywall registry from device reports, click receipts, stats | An offer card for an unreported paywall is refused; the first tap is recorded once | 1 wk |
 | **B8 Telegram** | Connect bot, notify, reply mapping, reactions, supergroup migration, throttle | Replying in Telegram lands in the app chat; 50 bursts respect the per-chat limit | 1.5 wks |
 | **B9 Appearance & assets** | Draft/publish remote appearance, asset library (PNG ≤ 512 px), team photos | SDK fetches the published version; drafts never leak | 1 wk |

@@ -38,6 +38,17 @@ describe("push.send", () => {
     expect(await deliverMessagePush(deps, (await scenario({ device: { signedOutAt: new Date() } })).replyId, once)).toBe("skipped");
   });
 
+  it("skips users who have the chat open, and pushes once they've left it", async () => {
+    const inChat = await scenario({ device: { chatOpen: true, lastSeenInChatAt: new Date() } });
+    expect(await deliverMessagePush(deps, inChat.replyId, once)).toBe("in_chat");
+    expect(production.requests.some((r) => r.deviceToken === inChat.token)).toBe(false);
+    // a socket that stopped sending heartbeats (its instance died) no longer counts
+    const stale = await scenario({ device: { chatOpen: true, lastSeenInChatAt: new Date(Date.now() - 60_000) } });
+    expect(await deliverMessagePush(deps, stale.replyId, once)).toBe("delivered");
+    const closed = await scenario({ device: { chatOpen: false, lastSeenInChatAt: new Date() } });
+    expect(await deliverMessagePush(deps, closed.replyId, once)).toBe("delivered");
+  });
+
   it("drops a token APNs says is gone", async () => {
     const s = await scenario();
     production.answer(s.token, 410, "Unregistered");

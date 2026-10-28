@@ -4,6 +4,7 @@ import { apps, conversations, messages, users, type Db, type Tx } from "@hshelby
 import { and, asc, count, desc, eq, gt, isNull, lt, sql } from "drizzle-orm";
 import { ApiError, isUniqueViolation, notFound } from "./errors";
 import { linkAttachments } from "./photos";
+import { publishLive } from "./realtime/events";
 
 /*
  * Every message goes through one short transaction:
@@ -11,8 +12,8 @@ import { linkAttachments } from "./photos";
  *      appends to a conversation, and the new last_seq is the message's seq. No gaps, no reordering.
  *   2. INSERT the message. A resent clientId violates a unique index, the whole transaction rolls back
  *      (seq included), and the caller gets the stored message instead of a duplicate.
- * A teammate's reply also enqueues its push inside the transaction, so a rolled-back message never
- * notifies anyone.
+ * A teammate's reply also enqueues its push inside the transaction, and every message is announced to live
+ * sockets with NOTIFY there too, so a rolled-back message never notifies anyone.
  */
 
 export type MessageRow = typeof messages.$inferSelect;
@@ -77,6 +78,14 @@ export async function appendUserMessage(
         })
         .returning();
       await linkAttachments(tx, { messageId: message!.id, deviceId: input.deviceId, uploadedBy: "user", ids: input.attachmentIds });
+      await publishLive(tx, {
+        type: "message",
+        organizationId: input.organizationId,
+        conversationId: conversation.id,
+        deviceId: input.deviceId,
+        seq: message!.seq,
+        sender: "user",
+      });
 
       // Completes the dashboard's "waiting for your first message" step, and marks the setup conversation.
       await tx
@@ -154,6 +163,14 @@ export async function appendAgentMessage(
         ids: input.attachmentIds,
       });
       await jobs.pushMessage(tx, message!.id);
+      await publishLive(tx, {
+        type: "message",
+        organizationId: conversation.organizationId,
+        conversationId: conversation.id,
+        deviceId: conversation.deviceId,
+        seq: message!.seq,
+        sender: "agent",
+      });
       return { message: message!, conversation, created: true };
     });
   } catch (err) {
@@ -192,6 +209,9 @@ async function findAgentReplay(
   return { ...row, created: false };
 }
 
+const readEvent = (c: ConversationRow, side: "user" | "team", seq: number) =>
+  ({ type: "read", organizationId: c.organizationId, conversationId: c.id, deviceId: c.deviceId, side, seq }) as const;
+
 /**
  * Moves the device user's read cursor forward (never back) and recounts their unread agent messages.
  * The row is locked first, so the count runs on a fresh snapshot that includes every committed append.
@@ -211,6 +231,7 @@ export async function markUserRead(db: Db, deviceId: string, seq: number): Promi
       .set({ userReadSeq: readSeq, unreadForUser: unread!.n })
       .where(eq(conversations.id, conversation.id))
       .returning();
+    await publishLive(tx, readEvent(updated!, "user", readSeq));
     return updated!;
   });
 }
@@ -240,6 +261,7 @@ export async function markTeamRead(
       .set({ teamReadSeq: readSeq, unreadForTeam: unread!.n })
       .where(eq(conversations.id, conversation.id))
       .returning();
+    await publishLive(tx, readEvent(updated!, "team", readSeq));
     return updated!;
   });
 }

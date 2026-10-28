@@ -3,7 +3,7 @@
 import type { InboxConversation, InboxList } from "@hshelby/contracts";
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AppHeader } from "@/components/AppHeader";
 import { BillingBanner } from "@/components/billing";
 import { VerifiedSeal } from "@/components/inbox/Identity";
@@ -11,6 +11,7 @@ import { deviceLabel, InboxContext } from "@/components/inbox/InboxContext";
 import { AppIcon, ErrorNote } from "@/components/ui";
 import { api } from "@/lib/api";
 import { useBilling } from "@/lib/billing";
+import { useLive, useLiveConnected } from "@/lib/live";
 import { relativeTime } from "@/lib/time";
 import { useVisibleInterval } from "@/lib/use-visible-interval";
 
@@ -34,6 +35,7 @@ function ConversationRow({ conversation: c, selected }: { conversation: InboxCon
             <span className={`flex min-w-0 items-center gap-1 text-[15px] ${unread ? "font-semibold" : ""}`}>
               <span className="truncate">{deviceLabel(c.device)}</span>
               {c.device.verified && <VerifiedSeal size={14} />}
+              {c.device.inChat && <span title="In chat now" aria-label="In chat now" className="size-2 shrink-0 rounded-full bg-[#22a355]" />}
             </span>
             <time dateTime={c.lastMessageAt} className="shrink-0 text-[12px] text-secondary">
               {relativeTime(c.lastMessageAt)}
@@ -95,7 +97,16 @@ export default function InboxLayout({ children }: LayoutProps<"/inbox">) {
   }, [listPath]);
 
   useEffect(() => refresh(), [refresh]);
-  useVisibleInterval(refresh, 5000);
+
+  // Live events refresh the list (a burst of them, once); polling is the fallback while the socket is down.
+  const live = useLiveConnected();
+  const pending = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  useLive((event) => {
+    if (event.type === "typing") return;
+    clearTimeout(pending.current);
+    pending.current = setTimeout(refresh, 150);
+  });
+  useVisibleInterval(refresh, live ? 30_000 : 5000);
 
   // Polling refreshes the first page; pages loaded with "Load more" stay, minus anything that moved.
   const conversations = useMemo(() => {

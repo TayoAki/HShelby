@@ -4,7 +4,7 @@ npm-workspaces monorepo. Node 22.
 
 | Path | What |
 |---|---|
-| `apps/api` | Hono API: Better Auth at `/api/auth/*`, org-scoped `/api/*`, SDK `/v1/*` later. Tests hit a real Postgres. |
+| `apps/api` | Hono API: Better Auth at `/api/auth/*`, org-scoped `/api/*`, SDK `/v1/*`, live WebSockets at `/api/live` and `/v1/live` (fan-out with Postgres LISTEN/NOTIFY). `src/server.ts` starts HTTP and the gateway together. Tests hit a real Postgres. |
 | `apps/worker` | pg-boss jobs: `push.send`, nightly cleanup, deleted-app purge, hourly unsent-upload sweep, hourly `billing.sync`. Needs `DATABASE_URL` and `ENC_KEYS`; `S3_*` for photos, `STRIPE_SECRET_KEY` for the billing sync. |
 | `apps/dashboard` | Next.js dashboard. Proxies `/api/*` to the API (`API_INTERNAL_URL`), so auth cookies stay first-party. |
 | `apps/web` | Landing-page study clone. Not deployed (it carries another company's brand). |

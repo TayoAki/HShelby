@@ -4,7 +4,7 @@ In-app support chat for iOS apps, modelled on a study of [reception.sh](https://
 
 | Path | What |
 |---|---|
-| `apps/api` | Hono API. Better Auth (email + password, organizations, Stripe test-mode subscriptions) at `/api/auth/*`, the dashboard's org-scoped routes (apps, inbox) at `/api/*`, the SDK's at `/v1/*`. |
+| `apps/api` | Hono API. Better Auth (email + password, organizations, Stripe test-mode subscriptions) at `/api/auth/*`, the dashboard's org-scoped routes (apps, inbox) at `/api/*`, the SDK's at `/v1/*`, and live WebSockets at `/api/live` and `/v1/live`. |
 | `apps/worker` | pg-boss jobs: push delivery, nightly cleanup, purging deleted apps, removing unsent photo uploads, syncing subscriptions from Stripe. |
 | `apps/dashboard` | Next.js dashboard: sign-up/in, onboarding (Add app → Connect → Integrations → Subscribe), and the team inbox. |
 | `apps/web` | Landing-page clone from the study. Not deployed: it reproduces another company's brand. |
@@ -26,7 +26,7 @@ npm run dev:api        # http://localhost:8080
 npm run dev:dashboard  # http://localhost:3000
 ```
 
-No iOS SDK yet? `npx tsx apps/api/scripts/sdk-sim.ts --app app_… --say "Hello" --chat` plays an app user: it registers a device, sends messages, and prints team replies from the inbox. `--user-id/--name/--email` identify the user (add `--verified` with `IDENTITY_SECRET` set to sign a token), `--meta key=value` sets custom fields, `--push-token <hex>` registers for notifications so "Send test" and replies target it, `--photo path.jpg` (repeatable, with an optional `--caption`) sends photos through the upload flow, and `--logout` / `--delete` end the device. Photos need the `S3_*` variables (see `apps/api/.env.example`).
+No iOS SDK yet? `npx tsx apps/api/scripts/sdk-sim.ts --app app_… --say "Hello" --chat` plays an app user: it registers a device, sends messages, and prints team replies from the inbox (with `--chat` it stays connected over the live WebSocket, so the dashboard shows it "In chat", and typing shows both ways). `--user-id/--name/--email` identify the user (add `--verified` with `IDENTITY_SECRET` set to sign a token), `--meta key=value` sets custom fields, `--push-token <hex>` registers for notifications so "Send test" and replies target it, `--photo path.jpg` (repeatable, with an optional `--caption`) sends photos through the upload flow, and `--logout` / `--delete` end the device. Photos need the `S3_*` variables (see `apps/api/.env.example`).
 
 Checks (CI runs the same): `npm run typecheck && npm run lint && npm test && npm run build`.
 

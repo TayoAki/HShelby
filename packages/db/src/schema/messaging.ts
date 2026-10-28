@@ -48,6 +48,13 @@ export const devices = pgTable(
     pushIssueAt: ts("push_issue_at"),
     blocked: boolean("blocked").notNull().default(false),
     lastSeenAt: ts("last_seen_at"),
+    /**
+     * "In chat" (phase B6): the SDK has a live socket open while the chat is on screen. `chatOpen` flips on
+     * connect and off on close; heartbeats refresh `lastSeenInChatAt`, so a crashed instance's sockets
+     * stop counting within the in-chat window.
+     */
+    chatOpen: boolean("chat_open").notNull().default(false),
+    lastSeenInChatAt: ts("last_seen_in_chat_at"),
     /** logout(): the credential is dead and the history stays; the app registers a new device next. */
     signedOutAt: ts("signed_out_at"),
     createdAt: ts("created_at").notNull().defaultNow(),
