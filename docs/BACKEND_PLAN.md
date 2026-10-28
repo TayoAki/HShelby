@@ -27,7 +27,7 @@ Why one Postgres for everything at the start: messages, the job queue, realtime 
 
 ## Status
 
-**B0–B4 run on Railway staging** (project `hshelby`, environment `staging`): dashboard at `https://dashboard-staging-0dee.up.railway.app`, API at `https://api-staging-f8f8.up.railway.app`.
+**B0–B5 run on Railway staging** (billing is switched off there until Stripe test keys are set) (project `hshelby`, environment `staging`): dashboard at `https://dashboard-staging-0dee.up.railway.app`, API at `https://api-staging-f8f8.up.railway.app`.
 
 B1 (messaging core) as built:
 
@@ -76,10 +76,21 @@ B2 (photos) as built:
 - **Checked on staging** (Railway Bucket): the bucket itself refuses a PUT whose bytes don't match the signed SHA-256 (400 `XAmzContentSHA256Mismatch`) or whose length or content type differs (403 `SignatureDoesNotMatch`); an unsigned GET is 403, and signed GETs come back with the overridden type. The server's own checks stay, since other providers (and the moto server in tests) don't enforce these.
 - **Deferred:** thumbnails (the dashboard and SDK show the ≤2048 px original), photos in Telegram (B8).
 
+B5 (billing) as built:
+
+- **Rules** (`packages/billing`): one subscription per workspace. `active`, `trialing` and `past_due` (Stripe retrying a failed renewal) keep paid features on; anything else (`canceled`, `unpaid`, `incomplete`…) turns them off. With billing switched off (no Stripe variables), nothing is gated.
+- **Gating** (402 `subscription_inactive`): teammates' replies and photo uploads, a second app, and invitations (Better Auth's `beforeCreateInvitation`). Never gated: anything end users do, reading the inbox, resolve and block, deleting a user's data, settings. Before subscribing, the team can reply in each app's setup conversation (its first conversation, from the developer's test device: `apps.setup_conversation_id`), as reception allows.
+- **Checkout and portal:** Better Auth's Stripe plugin (`/api/auth/subscription/upgrade` and `/billing-portal`, webhooks at `/api/auth/stripe/webhook`, and the return from Checkout, which records the subscription even before its webhook arrives). A guard sells only the plan on offer, only as a workspace subscription, only to owners and admins of a workspace that isn't subscribed. Card changes, plan changes and cancellation happen in Stripe's billing portal.
+- **Founder spots:** the founder prices (`STRIPE_PRICE_MONTHLY`, `STRIPE_PRICE_YEARLY`) are on sale until `FOUNDER_SPOTS` (default 50) workspaces hold a founder subscription that is still on; then the standard prices are. A founder who leaves frees a spot. The count is checked when Checkout starts, so two workspaces racing for the last spot can both get it. Without standard prices set, the founder price stays on sale. Amounts come from Stripe, cached for 10 minutes. `GET /public/pricing` (no auth, any origin, cached 60 s) gives the landing page the offer and the counter.
+- **Backstop:** the plugin answers 200 even when applying a webhook fails, so the worker's hourly `billing.sync` re-reads every subscription Stripe may still change and fixes rows that drifted. It needs `STRIPE_SECRET_KEY` on the worker.
+- **Dashboard:** a Billing page (plan, renewal or end date, a past-due notice and "Manage billing", or else the offer with the founder counter and Subscribe), an inbox banner while unsubscribed or past due, a composer that says why it's locked (and marks the setup conversation), "Add app" leading to Billing when locked, and the onboarding Subscribe step showing the live offer.
+- **Tests** run the real plugin against a fake Stripe (`@hshelby/billing/testing`): checkout and webhooks turn replies on; cancel-at-period-end and past-due keep them on; the end turns them off while the user's messages keep arriving; the return from Checkout works without the webhook; the plan, admin and founder-cap guards; a forged webhook is refused; the sync job fixes missed changes. A browser walkthrough runs the same loop through the fake's Checkout and portal pages.
+- **Not verified here:** real Stripe test mode. That needs a Stripe sandbox for this project with a product, four prices and a webhook endpoint.
+
 Where B0 differs from the plan below:
 
 - **Sign-in is email + password.** Google comes later; it is one `socialProviders.google` block in `apps/api/src/auth.ts` plus a button.
-- **Billing moved partly into B0.** Better Auth's Stripe plugin handles organization subscriptions (plan `founder`, monthly or yearly). It runs in **test mode only**: the API refuses `sk_live_` keys, and billing stays off until all four `STRIPE_*` variables are set. B5 keeps the gating middleware and the founder-spot counter.
+- **Billing moved partly into B0.** Better Auth's Stripe plugin handles organization subscriptions (plan `founder`, monthly or yearly). It runs in **test mode only**: the API refuses `sk_live_` keys, and billing stays off until all four `STRIPE_*` variables are set. B5 added the gating, founder spots, the portal and the sync backstop (see above).
 - **Not done yet:** OpenAPI output from `contracts`, Sentry, email delivery (invitations are logged, not sent).
 
 Railway layout:
@@ -87,7 +98,7 @@ Railway layout:
 | Service | Build / start | Notes |
 |---|---|---|
 | `api` | `npm run build -w @hshelby/api` / `npm run start -w @hshelby/api` | Pre-deploy `npm run migrate -w @hshelby/api`; healthcheck `/health` (runs `select 1`). |
-| `worker` | same with `@hshelby/worker` | pg-boss: `push.send`, nightly cleanup at 03:00 UTC, deleted-app purge every 15 minutes, unsent-upload sweep hourly. |
+| `worker` | same with `@hshelby/worker` | pg-boss: `push.send`, nightly cleanup at 03:00 UTC, deleted-app purge every 15 minutes, unsent-upload sweep and `billing.sync` hourly. |
 | `dashboard` | same with `@hshelby/dashboard` | Healthcheck `/health`. Proxies `/api/*` to the API over the private network, so auth cookies are first-party. |
 | `Postgres` | Railway template | |
 | `photos` | Railway Bucket | Private; read and written only through presigned URLs and the API. |
@@ -102,9 +113,11 @@ Variables (secrets are set in Railway only, never in the repo):
 | api | `BETTER_AUTH_URL` | `https://${{dashboard.RAILWAY_PUBLIC_DOMAIN}}` (the browser's origin) |
 | api | `BETTER_AUTH_SECRET`, `ENC_KEYS` | random; `ENC_KEYS` is `v1:<base64 32 bytes>` |
 | api | `PUBLIC_API_URL` | `https://${{RAILWAY_PUBLIC_DOMAIN}}` |
-| api | `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_PRICE_MONTHLY`, `STRIPE_PRICE_YEARLY` | Stripe sandbox values; webhook endpoint `https://<api domain>/api/auth/stripe/webhook` |
+| api | `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_PRICE_MONTHLY`, `STRIPE_PRICE_YEARLY` | Stripe sandbox values (the two prices are the founder prices); webhook endpoint `https://<api domain>/api/auth/stripe/webhook` with `checkout.session.completed` and `customer.subscription.created/updated/deleted` |
+| api | `STRIPE_PRICE_STANDARD_MONTHLY`, `STRIPE_PRICE_STANDARD_YEARLY`, `FOUNDER_SPOTS` | Optional: the prices after the founder spots (default 50) are taken |
 | worker | `DATABASE_URL` | `${{Postgres.DATABASE_URL}}` |
 | worker | `ENC_KEYS` | `${{api.ENC_KEYS}}` (decrypts apps' APNs keys) |
+| worker | `STRIPE_SECRET_KEY` | `${{api.STRIPE_SECRET_KEY}}` (billing sync; optional) |
 | api, worker | `S3_ENDPOINT`, `S3_REGION`, `S3_BUCKET`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY` | `${{photos.ENDPOINT}}`, `${{photos.REGION}}`, `${{photos.BUCKET}}`, `${{photos.ACCESS_KEY_ID}}`, `${{photos.SECRET_ACCESS_KEY}}` (photos are off without them) |
 | dashboard | `API_INTERNAL_URL` | `http://${{api.RAILWAY_PRIVATE_DOMAIN}}:${{api.PORT}}`, read at build time |
 
@@ -402,7 +415,7 @@ Each phase ends with acceptance tests that must pass in CI and on staging.
 | **B2 Photos** (done, see Status) | Presign, verify, signed GET, hourly cleanup | A wrong checksum is rejected; a pending upload disappears after 24h in a time-travel test | 0.5–1 wk |
 | **B3 Push** (built; real-device check pending, see Status) | `.p8` upload, `push.send`, env per device, templates, badge, issue capture, "send test" | Real device gets a push in sandbox and production builds; a revoked token clears itself | 1 wk |
 | **B4 Identity & deletion** (done, see Status) | `identify` labels, metadata limits, JWT verification, only-verified mode, logout/delete + `purge.scope` | JWT test vectors from the docs pass; a deleted device's rows and objects are gone | 1 wk |
-| **B5 Billing** | Stripe Checkout/Portal/webhooks, gating middleware, founder-spot counter | Test-mode subscription toggles reply access; users can still send while lapsed | 0.5–1 wk |
+| **B5 Billing** (built; real Stripe test mode pending, see Status) | Stripe Checkout/Portal/webhooks, gating middleware, founder-spot counter | Test-mode subscription toggles reply access; users can still send while lapsed | 0.5–1 wk |
 | **MVP backend** | | | **≈ 6–7 wks** |
 | **B6 Realtime** | WS gateway, LISTEN/NOTIFY fan-out, typing, presence, skip-push-when-in-chat | Two API instances: a reply sent via instance A reaches a socket on B in < 300 ms | 1–1.5 wks |
 | **B7 Cards** | Review + offer cards, paywall registry from device reports, click receipts, stats | An offer card for an unreported paywall is refused; the first tap is recorded once | 1 wk |

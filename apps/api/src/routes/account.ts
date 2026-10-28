@@ -1,9 +1,7 @@
-import { organizations, subscriptions } from "@hshelby/db";
-import { desc, eq } from "drizzle-orm";
+import { organizations } from "@hshelby/db";
+import { eq } from "drizzle-orm";
 import { Hono } from "hono";
-import { BILLING_PLAN } from "../auth";
 import type { AppEnv, Deps } from "../context";
-import { billingEnabled } from "../env";
 import { ApiError } from "../errors";
 
 export function accountRoutes(deps: Deps) {
@@ -20,19 +18,8 @@ export function accountRoutes(deps: Deps) {
   });
 
   r.get("/billing", async (c) => {
-    const [sub] = await deps.db
-      .select()
-      .from(subscriptions)
-      .where(eq(subscriptions.referenceId, c.get("org").id))
-      .orderBy(desc(subscriptions.periodEnd))
-      .limit(1);
-    return c.json({
-      enabled: billingEnabled(deps.env),
-      plan: BILLING_PLAN,
-      subscription: sub
-        ? { status: sub.status, periodEnd: sub.periodEnd?.toISOString() ?? null, cancelAtPeriodEnd: Boolean(sub.cancelAtPeriodEnd) }
-        : null,
-    });
+    const org = c.get("org");
+    return c.json(await deps.billing.state(org.id, org.role));
   });
 
   r.get("/appstore/search", async (c) => {

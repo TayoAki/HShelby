@@ -4,16 +4,32 @@ import { deliverMessagePush, PUSH_QUEUE, PUSH_QUEUE_OPTIONS, type ApnsClient, ty
 import type { Storage } from "@hshelby/storage";
 import type { PgBoss } from "pg-boss";
 import type { Logger } from "pino";
+import type Stripe from "stripe";
+import { syncSubscriptions } from "./jobs/billing";
 import { runCleanup } from "./jobs/cleanup";
 import { purgeDeletedApps } from "./jobs/purge";
 import { removeUnsentUploads } from "./jobs/uploads";
 
-const QUEUES = { cleanup: "maintenance.cleanup", purgeApps: "purge.deleted-apps", uploads: "maintenance.unsent-uploads" } as const;
+const QUEUES = {
+  cleanup: "maintenance.cleanup",
+  purgeApps: "purge.deleted-apps",
+  uploads: "maintenance.unsent-uploads",
+  billing: "billing.sync",
+} as const;
 
-export type WorkerDeps = { db: Db; boss: PgBoss; apns: ApnsClient; keyring: Keyring; storage: Storage | null; logger: Logger };
+export type WorkerDeps = {
+  db: Db;
+  boss: PgBoss;
+  apns: ApnsClient;
+  keyring: Keyring;
+  storage: Storage | null;
+  /** For the billing backstop; null when billing is off. */
+  stripe: Stripe | null;
+  logger: Logger;
+};
 
 /** Creates the queues and schedules, and starts working them. */
-export async function startWorker({ db, boss, apns, keyring, storage, logger }: WorkerDeps) {
+export async function startWorker({ db, boss, apns, keyring, storage, stripe, logger }: WorkerDeps) {
   await boss.start();
   for (const queue of Object.values(QUEUES)) await boss.createQueue(queue);
   await boss.createQueue(PUSH_QUEUE, PUSH_QUEUE_OPTIONS);
@@ -21,6 +37,7 @@ export async function startWorker({ db, boss, apns, keyring, storage, logger }: 
   await boss.schedule(QUEUES.cleanup, "0 3 * * *", null, { tz: "UTC" });
   await boss.schedule(QUEUES.purgeApps, "*/15 * * * *", null, { tz: "UTC" });
   await boss.schedule(QUEUES.uploads, "23 * * * *", null, { tz: "UTC" });
+  await boss.schedule(QUEUES.billing, "41 * * * *", null, { tz: "UTC" });
 
   await boss.work(QUEUES.cleanup, async () => {
     const removed = await runCleanup(db);
@@ -39,6 +56,13 @@ export async function startWorker({ db, boss, apns, keyring, storage, logger }: 
     const removed = await removeUnsentUploads(db, storage);
     if (removed > 0) logger.info({ removed }, "unsent uploads removed");
     return removed;
+  });
+
+  await boss.work(QUEUES.billing, async () => {
+    if (!stripe) return null;
+    const synced = await syncSubscriptions(db, stripe, logger);
+    if (synced.fixed > 0) logger.info({ synced }, "billing synced");
+    return synced;
   });
 
   // Retryable APNs answers throw, so pg-boss backs off and tries again; the last attempt records the

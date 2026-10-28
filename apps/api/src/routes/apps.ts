@@ -55,6 +55,7 @@ export function appRoutes(deps: Deps) {
   r.post("/", async (c) => {
     const input = await parseJson(c, CreateAppInput);
     const org = c.get("org");
+    await deps.billing.requireCanAddApp(org.id);
 
     let details: Pick<AppRow, "name" | "iconUrl" | "bundleId" | "appStoreId" | "appStoreUrl" | "sellerName">;
     if ("appStoreId" in input) {

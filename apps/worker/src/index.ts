@@ -4,6 +4,7 @@ import { createApnsClient } from "@hshelby/push";
 import { createStorage, storageConfigFromEnv } from "@hshelby/storage";
 import { PgBoss } from "pg-boss";
 import pino from "pino";
+import Stripe from "stripe";
 import { startWorker } from "./worker";
 
 const logger = pino({ level: process.env.LOG_LEVEL ?? "info", base: { service: "worker" } });
@@ -22,7 +23,12 @@ boss.on("error", (err) => logger.error({ err }, "pg-boss error"));
 const storageConfig = storageConfigFromEnv(process.env);
 const storage = storageConfig ? createStorage(storageConfig) : null;
 
-const queues = await startWorker({ db, boss, apns, keyring: parseKeyring(process.env.ENC_KEYS), storage, logger });
+// billing backstop: optional, and test mode only, like in the API
+const stripeKey = process.env.STRIPE_SECRET_KEY?.trim();
+if (stripeKey?.startsWith("sk_live_")) throw new Error("Refusing to start with a live Stripe key: Stripe runs in test mode only.");
+const stripe = stripeKey ? new Stripe(stripeKey) : null;
+
+const queues = await startWorker({ db, boss, apns, keyring: parseKeyring(process.env.ENC_KEYS), storage, stripe, logger });
 logger.info({ queues }, "worker started");
 
 for (const signal of ["SIGTERM", "SIGINT"] as const) {

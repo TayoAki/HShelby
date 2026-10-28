@@ -15,6 +15,7 @@ import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type F
 import { AppIcon, ErrorNote, Spinner } from "@/components/ui";
 import { api, ApiError, apiForm } from "@/lib/api";
 import { authClient } from "@/lib/auth-client";
+import { useBilling } from "@/lib/billing";
 import { preparePhoto } from "@/lib/photos";
 import { clockTime, dayLabel, localTimeIn, relativeTime, sameDay } from "@/lib/time";
 import { isAdmin, useMe } from "@/lib/use-me";
@@ -74,6 +75,7 @@ export function Thread({ conversationId }: { conversationId: string }) {
   const me = useMe();
   const { data: session } = authClient.useSession();
   const [conversation, setConversation] = useState<InboxConversation | null>(null);
+  const { billing, reload: reloadBilling } = useBilling();
   const [items, setItems] = useState<Item[]>([]);
   const [hasOlder, setHasOlder] = useState(false);
   const [loadingOlder, setLoadingOlder] = useState(false);
@@ -162,8 +164,10 @@ export function Thread({ conversationId }: { conversationId: string }) {
       setItems((current) => merge(current, [message]));
       setConversation((c) => c && { ...c, lastSeq: Math.max(c.lastSeq, message.seq), unreadForTeam: 0 });
       refresh();
-    } catch {
+    } catch (e) {
       setItems((current) => current.map((m) => (m.state && m.clientId === clientId ? { ...m, state: "failed" } : m)));
+      // the subscription lapsed since the page loaded: show why replies stopped
+      if (e instanceof ApiError && e.code === "subscription_inactive") reloadBilling();
     }
   }
 
@@ -281,6 +285,9 @@ export function Thread({ conversationId }: { conversationId: string }) {
 
   const { device, app } = conversation;
   const open = conversation.status === "open";
+  // without a subscription, the team replies only in the app's setup conversation
+  const unsubscribed = Boolean(billing?.enabled && !billing.active);
+  const replyLocked = unsubscribed && !conversation.setup;
 
   return (
     <div className="flex min-w-0 flex-1">
@@ -390,49 +397,63 @@ export function Thread({ conversationId }: { conversationId: string }) {
             </button>
           </p>
         )}
-        <form onSubmit={submit} className="px-5 pb-4">
-          <StagedPhotos photos={staged} onRemove={unstage} />
-          <div className="flex items-end gap-2 rounded-[24px] border border-[var(--field)] bg-white p-1.5 transition-colors focus-within:border-fg/60">
-            <input
-              ref={fileInput}
-              type="file"
-              accept="image/*"
-              multiple
-              hidden
-              onChange={(e) => pickPhotos(e.target.files)}
-            />
-            <button
-              type="button"
-              onClick={() => fileInput.current?.click()}
-              disabled={staged.length >= PHOTO_LIMITS.perMessage}
-              aria-label="Attach photos"
-              className="flex size-9 shrink-0 items-center justify-center rounded-full text-secondary transition-colors hover:bg-panel hover:text-fg disabled:opacity-40"
-            >
-              <ImageIcon width={18} height={18} />
-            </button>
-            <textarea
-              value={draft}
-              onChange={(e) => setDraft(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) submit(e);
-              }}
-              rows={1}
-              maxLength={MESSAGE_MAX_LENGTH}
-              placeholder="Reply…"
-              aria-label="Reply"
-              className="field-sizing-content max-h-40 min-h-9 flex-1 resize-none bg-transparent py-2 text-[15px] outline-none placeholder:text-muted"
-            />
-            <button
-              type="submit"
-              disabled={(!draft.trim() && ready.length === 0) || uploading}
-              aria-label="Send"
-              className="flex size-9 shrink-0 items-center justify-center rounded-full bg-[var(--accent)] text-white transition-colors hover:bg-[var(--accent-hover)] disabled:bg-[var(--accent-disabled)]"
-            >
-              <ArrowUpIcon width={18} height={18} />
-            </button>
+        {replyLocked ? (
+          <div className="px-5 pb-4">
+            <div className="rounded-[24px] bg-panel px-5 py-4 text-[14px]">
+              <p>Subscribe to reply. {deviceLabel(device)} can still write in, and nothing is lost.</p>
+              <Link href="/billing" className="mt-2 inline-block underline underline-offset-2">
+                Subscribe
+              </Link>
+            </div>
           </div>
-          <p className="mt-1.5 px-3 text-[12px] text-muted">Enter to send · Shift+Enter for a new line</p>
-        </form>
+        ) : (
+          <form onSubmit={submit} className="px-5 pb-4">
+            {unsubscribed && (
+              <p className="mb-2 px-3 text-[12px] text-muted">This is your app&apos;s setup conversation: you can reply here before subscribing.</p>
+            )}
+            <StagedPhotos photos={staged} onRemove={unstage} />
+            <div className="flex items-end gap-2 rounded-[24px] border border-[var(--field)] bg-white p-1.5 transition-colors focus-within:border-fg/60">
+              <input
+                ref={fileInput}
+                type="file"
+                accept="image/*"
+                multiple
+                hidden
+                onChange={(e) => pickPhotos(e.target.files)}
+              />
+              <button
+                type="button"
+                onClick={() => fileInput.current?.click()}
+                disabled={staged.length >= PHOTO_LIMITS.perMessage}
+                aria-label="Attach photos"
+                className="flex size-9 shrink-0 items-center justify-center rounded-full text-secondary transition-colors hover:bg-panel hover:text-fg disabled:opacity-40"
+              >
+                <ImageIcon width={18} height={18} />
+              </button>
+              <textarea
+                value={draft}
+                onChange={(e) => setDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) submit(e);
+                }}
+                rows={1}
+                maxLength={MESSAGE_MAX_LENGTH}
+                placeholder="Reply…"
+                aria-label="Reply"
+                className="field-sizing-content max-h-40 min-h-9 flex-1 resize-none bg-transparent py-2 text-[15px] outline-none placeholder:text-muted"
+              />
+              <button
+                type="submit"
+                disabled={(!draft.trim() && ready.length === 0) || uploading}
+                aria-label="Send"
+                className="flex size-9 shrink-0 items-center justify-center rounded-full bg-[var(--accent)] text-white transition-colors hover:bg-[var(--accent-hover)] disabled:bg-[var(--accent-disabled)]"
+              >
+                <ArrowUpIcon width={18} height={18} />
+              </button>
+            </div>
+            <p className="mt-1.5 px-3 text-[12px] text-muted">Enter to send · Shift+Enter for a new line</p>
+          </form>
+        )}
       </section>
 
       {viewing && <PhotoViewer attachment={viewing} onClose={() => setViewing(null)} />}

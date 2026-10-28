@@ -9,6 +9,7 @@ import { BrandMark } from "./ui";
 const links = [
   { href: "/inbox", label: "Inbox" },
   { href: "/apps", label: "Apps" },
+  { href: "/billing", label: "Billing" },
 ] as const;
 
 export function AppHeader({ className = "" }: { className?: string }) {

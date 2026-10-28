@@ -78,10 +78,10 @@ export async function appendUserMessage(
         .returning();
       await linkAttachments(tx, { messageId: message!.id, deviceId: input.deviceId, uploadedBy: "user", ids: input.attachmentIds });
 
-      // Completes the dashboard's "waiting for your first message" step.
+      // Completes the dashboard's "waiting for your first message" step, and marks the setup conversation.
       await tx
         .update(apps)
-        .set({ firstMessageAt: sql`now()` })
+        .set({ firstMessageAt: sql`now()`, setupConversationId: conversation.id })
         .where(and(eq(apps.id, input.appId), isNull(apps.firstMessageAt)));
 
       return { message: message!, conversation, created: true };

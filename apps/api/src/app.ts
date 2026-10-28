@@ -32,6 +32,13 @@ export function createApp(deps: Deps) {
     return c.json({ ok: true });
   });
 
+  // What a new subscriber pays and how many founder spots are left, for the landing page.
+  app.get("/public/pricing", async (c) => {
+    c.header("access-control-allow-origin", "*");
+    c.header("cache-control", "public, max-age=60");
+    return c.json({ enabled: deps.billing.enabled, offer: await deps.billing.offer() });
+  });
+
   // Better Auth owns /api/auth/* (sign-up, sign-in, sessions, organizations, Stripe webhooks).
   app.on(["GET", "POST"], "/api/auth/*", (c) => deps.auth.handler(c.req.raw));
 

@@ -14,13 +14,13 @@ import {
 } from "@hshelby/db";
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
+import { APIError, createAuthMiddleware, getSessionFromCtx } from "better-auth/api";
 import { organization } from "better-auth/plugins/organization";
 import { and, asc, eq, inArray, isNull } from "drizzle-orm";
 import type { Logger } from "pino";
-import Stripe from "stripe";
-import { billingEnabled, type Env } from "./env";
-
-export const BILLING_PLAN = "founder";
+import type Stripe from "stripe";
+import type { Billing } from "./billing";
+import type { Env } from "./env";
 
 const slugify = (value: string) =>
   value
@@ -39,7 +39,9 @@ export async function isOrgAdmin(db: Db, userId: string, organizationId: string)
   return Boolean(row);
 }
 
-export function createAuth({ db, env, logger }: { db: Db; env: Env; logger: Logger }) {
+type AuthDeps = { db: Db; env: Env; logger: Logger; stripe: Stripe | null; billing: Billing };
+
+export function createAuth({ db, env, logger, stripe: stripeClient, billing }: AuthDeps) {
   const trustedOrigins = [env.BETTER_AUTH_URL, ...(env.TRUSTED_ORIGINS?.split(",").map((s) => s.trim()) ?? [])];
 
   const plugins = [
@@ -51,25 +53,59 @@ export function createAuth({ db, env, logger }: { db: Db; env: Env; logger: Logg
           "invitation created (email delivery not configured)",
         );
       },
+      organizationHooks: {
+        // inviting teammates is a paid feature
+        async beforeCreateInvitation({ organization }) {
+          if (!(await billing.isActive(organization.id))) {
+            throw new APIError("PAYMENT_REQUIRED", { code: "subscription_inactive", message: "Subscribe to invite teammates." });
+          }
+        },
+      },
     }),
   ];
 
-  const billing = billingEnabled(env)
+  const billingPlugins = stripeClient
     ? [
         stripe({
-          stripeClient: new Stripe(env.STRIPE_SECRET_KEY!),
+          stripeClient,
           stripeWebhookSecret: env.STRIPE_WEBHOOK_SECRET!,
           createCustomerOnSignUp: false,
           organization: { enabled: true },
           subscription: {
             enabled: true,
-            plans: [{ name: BILLING_PLAN, priceId: env.STRIPE_PRICE_MONTHLY, annualDiscountPriceId: env.STRIPE_PRICE_YEARLY }],
+            plans: billing.plans,
             // only owners/admins of the organization may start or manage its subscription
             authorizeReference: async ({ user, referenceId }) => isOrgAdmin(db, user.id, referenceId),
+          },
+          async onEvent(event) {
+            const object = event.data.object as { id?: string; status?: string };
+            logger.info({ type: event.type, objectId: object.id, status: object.status }, "stripe webhook");
           },
         }),
       ]
     : [];
+
+  /**
+   * Checkout sells the plan on offer now (founder until the spots are taken) and only to a workspace that
+   * isn't already subscribed; plan changes and cancellation happen in Stripe's billing portal.
+   */
+  const checkoutGuard = createAuthMiddleware(async (ctx) => {
+    if (ctx.path !== "/subscription/upgrade" || !billing.enabled) return;
+    const session = await getSessionFromCtx(ctx);
+    const body = (ctx.body ?? {}) as { plan?: string; referenceId?: string; customerType?: string };
+    const referenceId = body.referenceId ?? session?.session.activeOrganizationId;
+    // the plugin refuses requests without a session or for someone else's workspace
+    if (!session || !referenceId || !(await isOrgAdmin(db, session.user.id, referenceId))) return;
+    if (body.customerType !== "organization") {
+      throw new APIError("BAD_REQUEST", { code: "validation_failed", message: "Subscriptions belong to the workspace" });
+    }
+    if (await billing.isActive(referenceId)) {
+      throw new APIError("BAD_REQUEST", { code: "already_subscribed", message: "This workspace is already subscribed. Manage the plan in Billing." });
+    }
+    if (body.plan?.toLowerCase() !== (await billing.offer())?.plan) {
+      throw new APIError("BAD_REQUEST", { code: "plan_unavailable", message: "That price isn't available any more. Reload to see the current one." });
+    }
+  });
 
   return betterAuth({
     appName: brand.name,
@@ -131,7 +167,8 @@ export function createAuth({ db, env, logger }: { db: Db; env: Env; logger: Logg
         },
       },
     },
-    plugins: [...plugins, ...billing],
+    hooks: { before: checkoutGuard },
+    plugins: [...plugins, ...billingPlugins],
   });
 }
 

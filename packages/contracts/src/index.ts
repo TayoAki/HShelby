@@ -30,6 +30,9 @@ export const errorCodes = [
   "upload_incomplete",
   "invalid_attachment",
   "too_many_uploads",
+  "subscription_inactive",
+  "plan_unavailable",
+  "already_subscribed",
   "internal_error",
 ] as const;
 export type ErrorCode = (typeof errorCodes)[number];
@@ -106,17 +109,7 @@ export type AppStoreResult = z.infer<typeof AppStoreResult>;
 export const AppStoreSearch = z.object({ results: z.array(AppStoreResult) });
 export type AppStoreSearch = z.infer<typeof AppStoreSearch>;
 
-/* ---------- billing ---------- */
-
-export const BillingConfig = z.object({
-  enabled: z.boolean(),
-  plan: z.string(),
-  subscription: z
-    .object({ status: z.string().nullable(), periodEnd: z.string().nullable(), cancelAtPeriodEnd: z.boolean() })
-    .nullable(),
-});
-export type BillingConfig = z.infer<typeof BillingConfig>;
-
+export * from "./billing";
 export * from "./identity";
 export * from "./messaging";
 export * from "./photos";

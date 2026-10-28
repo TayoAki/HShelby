@@ -5,10 +5,12 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AppHeader } from "@/components/AppHeader";
+import { BillingBanner } from "@/components/billing";
 import { VerifiedSeal } from "@/components/inbox/Identity";
 import { deviceLabel, InboxContext } from "@/components/inbox/InboxContext";
 import { AppIcon, ErrorNote } from "@/components/ui";
 import { api } from "@/lib/api";
+import { useBilling } from "@/lib/billing";
 import { relativeTime } from "@/lib/time";
 import { useVisibleInterval } from "@/lib/use-visible-interval";
 
@@ -65,6 +67,7 @@ export default function InboxLayout({ children }: LayoutProps<"/inbox">) {
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [q, setQ] = useState("");
+  const { billing } = useBilling();
 
   const listPath = useCallback(
     (cursor?: string) =>
@@ -126,6 +129,7 @@ export default function InboxLayout({ children }: LayoutProps<"/inbox">) {
     <InboxContext value={context}>
       <div className="flex h-svh flex-col">
         <AppHeader className="border-b border-line px-5" />
+        <BillingBanner billing={billing} />
         <div className="flex min-h-0 flex-1">
           <aside
             className={`w-full shrink-0 flex-col border-r border-line md:flex md:w-[340px] ${conversationId ? "hidden" : "flex"}`}

@@ -8,6 +8,7 @@ import { useEffect, useState } from "react";
 import { AppHeader } from "@/components/AppHeader";
 import { AppIcon, ErrorNote, Spinner } from "@/components/ui";
 import { api } from "@/lib/api";
+import { useBilling } from "@/lib/billing";
 import { useCopy } from "@/lib/use-copy";
 
 function AppIdButton({ publicId }: { publicId: string }) {
@@ -25,6 +26,9 @@ export default function AppsPage() {
   const [apps, setApps] = useState<App[] | null>(null);
   const [me, setMe] = useState<Me | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const { billing } = useBilling();
+  // the first app is free to set up; more need a subscription
+  const addAppLocked = Boolean(billing?.enabled && !billing.active);
 
   useEffect(() => {
     Promise.all([api<{ apps: App[] }>("/apps"), api<Me>("/me")])
@@ -51,9 +55,15 @@ export default function AppsPage() {
               <p className="text-[14px] text-secondary">{me?.organization?.name}</p>
               <h1 className="text-[40px] leading-[1.1] tracking-[-.045em]">Your apps</h1>
             </div>
-            <Link href="/onboarding/add" className="inline-flex h-11 items-center gap-2 rounded-full bg-[var(--accent)] px-5 text-[14px] text-white hover:bg-[var(--accent-hover)]">
-              <PlusIcon /> Add app
-            </Link>
+            <div className="text-right">
+              <Link
+                href={addAppLocked ? "/billing" : "/onboarding/add"}
+                className="inline-flex h-11 items-center gap-2 rounded-full bg-[var(--accent)] px-5 text-[14px] text-white hover:bg-[var(--accent-hover)]"
+              >
+                <PlusIcon /> Add app
+              </Link>
+              {addAppLocked && <p className="mt-1.5 text-[12px] text-secondary">Subscribe to add more apps</p>}
+            </div>
           </div>
           <ul className="mt-8 space-y-3">
             {apps.map((app) => (

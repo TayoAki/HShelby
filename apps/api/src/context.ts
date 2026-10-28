@@ -4,6 +4,7 @@ import type { ApnsClient } from "@hshelby/push";
 import type { Storage } from "@hshelby/storage";
 import type { Logger } from "pino";
 import type { Auth } from "./auth";
+import type { Billing } from "./billing";
 import type { Env } from "./env";
 import type { Jobs } from "./jobs";
 
@@ -21,6 +22,7 @@ export type Deps = {
   apns: ApnsClient;
   /** Photo storage; null when no bucket is configured. */
   storage: Storage | null;
+  billing: Billing;
 };
 
 type SessionResult = NonNullable<Awaited<ReturnType<Auth["api"]["getSession"]>>>;

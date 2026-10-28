@@ -29,8 +29,11 @@ export const fakeAppStore: AppStoreClient & { results: AppStoreResult[] } = {
   },
 };
 
-/** The API against the test database, with its job queue started. Pass `apns` to use a fake APNs. */
-export async function makeTestApp(overrides: Parameters<typeof createDeps>[1] = {}) {
+/**
+ * The API against the test database, with its job queue started. Pass `apns` to use a fake APNs, `stripe`
+ * (with the `STRIPE_*` variables in `extraEnv`) to switch billing on against a fake Stripe.
+ */
+export async function makeTestApp(overrides: Parameters<typeof createDeps>[1] = {}, extraEnv: Record<string, string> = {}) {
   const env = loadEnv({
     NODE_ENV: "test",
     DATABASE_URL: process.env.TEST_DATABASE_URL ?? "postgres://postgres@localhost:5433/hshelby_test",
@@ -38,6 +41,7 @@ export async function makeTestApp(overrides: Parameters<typeof createDeps>[1] = 
     BETTER_AUTH_SECRET: randomBytes(32).toString("base64"),
     ENC_KEYS: `v1:${randomBytes(32).toString("base64")}`,
     PUBLIC_API_URL: "https://api.test",
+    ...extraEnv,
   });
   const { deps, pool } = createDeps(env, { appStore: fakeAppStore, ...overrides });
   await deps.jobs.start();

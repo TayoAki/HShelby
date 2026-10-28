@@ -26,6 +26,11 @@ export const apps = pgTable(
     onlyVerified: boolean("only_verified").notNull().default(false),
     /** Set when the SDK delivers the app's first message (phase B1). */
     firstMessageAt: ts("first_message_at"),
+    /**
+     * The conversation of that first message: the developer's own test device during setup. The team can
+     * reply there without a subscription. Not a foreign key; if the conversation is deleted, nothing matches.
+     */
+    setupConversationId: uuid("setup_conversation_id"),
     createdAt: ts("created_at").notNull().defaultNow(),
     updatedAt: ts("updated_at").notNull().defaultNow(),
     deletedAt: ts("deleted_at"),

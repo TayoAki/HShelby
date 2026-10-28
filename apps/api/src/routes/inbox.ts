@@ -94,6 +94,7 @@ export function conversationRoutes(deps: Deps) {
         device: devices,
         lastSender: messages.sender,
         lastText: messages.text,
+        setupConversationId: apps.setupConversationId,
       })
       .from(conversations)
       .innerJoin(apps, and(eq(apps.id, conversations.appId), isNull(apps.deletedAt)))
@@ -112,6 +113,7 @@ export function conversationRoutes(deps: Deps) {
     lastMessageAt: row.conversation.lastMessageAt.toISOString(),
     // a photo-only message has no text to preview
     lastMessage: row.lastSender && row.lastText !== null ? { sender: row.lastSender, text: row.lastText || "Photo" } : null,
+    setup: row.setupConversationId === row.conversation.id,
   });
 
   async function findConversation(orgId: string, id: string) {
@@ -174,6 +176,7 @@ export function conversationRoutes(deps: Deps) {
   r.post("/:id/attachments", async (c) => {
     const storage = requireStorage(deps.storage);
     const { conversation } = await findConversation(c.get("org").id, c.req.param("id"));
+    await deps.billing.requireCanReply(conversation.organizationId, conversation.id);
     const form = await c.req.parseBody();
     const file = form.file;
     if (!(file instanceof File)) throw new ApiError(400, "validation_failed", "file: attach a photo");
@@ -210,6 +213,7 @@ export function conversationRoutes(deps: Deps) {
     const id = c.req.param("id");
     if (!isUuid(id)) throw notFound("Conversation");
     const user = c.get("user");
+    await deps.billing.requireCanReply(c.get("org").id, id);
     const result = await appendAgentMessage(db, deps.jobs, {
       organizationId: c.get("org").id,
       conversationId: id,

@@ -30,11 +30,15 @@ const EnvSchema = z.object({
   S3_ACCESS_KEY_ID: optional,
   S3_SECRET_ACCESS_KEY: optional,
   S3_FORCE_PATH_STYLE: optional,
-  // Stripe (test mode). Billing is off unless all four are set.
+  // Stripe (test mode). Billing is off unless the key, webhook secret and both founder prices are set.
   STRIPE_SECRET_KEY: optional,
   STRIPE_WEBHOOK_SECRET: optional,
   STRIPE_PRICE_MONTHLY: optional,
   STRIPE_PRICE_YEARLY: optional,
+  /** Prices after the founder spots are taken. Without both, the founder price stays on sale. */
+  STRIPE_PRICE_STANDARD_MONTHLY: optional,
+  STRIPE_PRICE_STANDARD_YEARLY: optional,
+  FOUNDER_SPOTS: z.coerce.number().int().min(0).default(50),
 });
 
 export type Env = z.infer<typeof EnvSchema>;

@@ -167,6 +167,8 @@ export const InboxConversation = z.object({
   unreadForTeam: z.number().int(),
   lastMessageAt: z.string(),
   lastMessage: z.object({ sender: MessageSender, text: z.string() }).nullable(),
+  /** The app's setup conversation (its first, from the developer's test device): replies work here without a subscription. */
+  setup: z.boolean(),
 });
 export type InboxConversation = z.infer<typeof InboxConversation>;
 
