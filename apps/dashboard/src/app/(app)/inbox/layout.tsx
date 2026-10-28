@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AppHeader } from "@/components/AppHeader";
+import { VerifiedSeal } from "@/components/inbox/Identity";
 import { deviceLabel, InboxContext } from "@/components/inbox/InboxContext";
 import { AppIcon, ErrorNote } from "@/components/ui";
 import { api } from "@/lib/api";
@@ -28,7 +29,10 @@ function ConversationRow({ conversation: c, selected }: { conversation: InboxCon
         <AppIcon app={c.app} size={40} />
         <div className="min-w-0 flex-1">
           <div className="flex items-baseline justify-between gap-2">
-            <span className={`truncate text-[15px] ${unread ? "font-semibold" : ""}`}>{deviceLabel(c.device)}</span>
+            <span className={`flex min-w-0 items-center gap-1 text-[15px] ${unread ? "font-semibold" : ""}`}>
+              <span className="truncate">{deviceLabel(c.device)}</span>
+              {c.device.verified && <VerifiedSeal size={14} />}
+            </span>
             <time dateTime={c.lastMessageAt} className="shrink-0 text-[12px] text-secondary">
               {relativeTime(c.lastMessageAt)}
             </time>
@@ -59,15 +63,33 @@ export default function InboxLayout({ children }: LayoutProps<"/inbox">) {
   /** Cursor after the last "Load more" page; undefined until the first one. */
   const [olderCursor, setOlderCursor] = useState<string | null>();
   const [error, setError] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
+  const [q, setQ] = useState("");
+
+  const listPath = useCallback(
+    (cursor?: string) =>
+      `/conversations?status=${tab}&limit=50${q ? `&q=${encodeURIComponent(q)}` : ""}${cursor ? `&cursor=${cursor}` : ""}`,
+    [tab, q],
+  );
+
+  // search as you type, once typing pauses
+  useEffect(() => {
+    const id = setTimeout(() => {
+      setQ(query.trim());
+      setOlder([]);
+      setOlderCursor(undefined);
+    }, 250);
+    return () => clearTimeout(id);
+  }, [query]);
 
   const refresh = useCallback(() => {
-    api<InboxList>(`/conversations?status=${tab}&limit=50`)
+    api<InboxList>(listPath())
       .then((list) => {
         setFirstPage(list);
         setError(null);
       })
       .catch((e: unknown) => setError(e instanceof Error ? e.message : "Couldn't load the inbox"));
-  }, [tab]);
+  }, [listPath]);
 
   useEffect(() => refresh(), [refresh]);
   useVisibleInterval(refresh, 5000);
@@ -83,7 +105,7 @@ export default function InboxLayout({ children }: LayoutProps<"/inbox">) {
 
   function loadMore() {
     if (!nextCursor) return;
-    api<InboxList>(`/conversations?status=${tab}&limit=50&cursor=${nextCursor}`)
+    api<InboxList>(listPath(nextCursor))
       .then((list) => {
         setOlder((prev) => [...prev, ...list.conversations]);
         setOlderCursor(list.nextCursor);
@@ -125,6 +147,16 @@ export default function InboxLayout({ children }: LayoutProps<"/inbox">) {
                 ))}
               </div>
             </div>
+            <div className="px-5 pb-3">
+              <input
+                type="search"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Search name, email, user ID…"
+                aria-label="Search conversations"
+                className="h-10 w-full rounded-full bg-panel px-4 text-[14px] outline-none transition-shadow placeholder:text-muted focus:bg-white focus:shadow-[inset_0_0_0_1px_var(--field)]"
+              />
+            </div>
             <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-4">
               {error && (
                 <div className="px-3">
@@ -134,7 +166,7 @@ export default function InboxLayout({ children }: LayoutProps<"/inbox">) {
               {!conversations && !error && <p className="px-3 py-6 text-[14px] text-secondary">Loading…</p>}
               {conversations?.length === 0 && (
                 <p className="px-3 py-6 text-[14px] text-secondary">
-                  {tab === "open" ? "No open conversations." : "Nothing resolved yet."}
+                  {q ? "No matches." : tab === "open" ? "No open conversations." : "Nothing resolved yet."}
                 </p>
               )}
               {conversations && conversations.length > 0 && (

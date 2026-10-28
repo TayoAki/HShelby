@@ -9,11 +9,12 @@ import {
 } from "@hshelby/contracts";
 import { uuidv7 } from "@hshelby/core";
 import { apps, auditEvents, conversations, devices, messages } from "@hshelby/db";
-import { and, desc, eq, inArray, isNull, sql } from "drizzle-orm";
+import { and, desc, eq, ilike, inArray, isNull, or, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import type { AppEnv, Deps } from "../context";
 import { ApiError, notFound } from "../errors";
 import { appendAgentMessage, markTeamRead, pageMessages, type ConversationRow, type PagedMessage } from "../messaging";
+import { requireOrgAdmin } from "../middleware";
 import { isUuid, parseJson, parseQuery } from "../validation";
 
 type DeviceRow = typeof devices.$inferSelect;
@@ -29,7 +30,17 @@ const toInboxDevice = (d: DeviceRow): InboxDevice => ({
   blocked: d.blocked,
   lastSeenAt: d.lastSeenAt?.toISOString() ?? null,
   createdAt: d.createdAt.toISOString(),
+  userId: d.userIdExt,
+  name: d.name,
+  email: d.email,
+  verified: d.verified,
+  verifiedAt: d.verifiedAt?.toISOString() ?? null,
+  metadata: d.metadata,
+  signedOutAt: d.signedOutAt?.toISOString() ?? null,
 });
+
+/** ILIKE pattern for a literal substring. */
+const contains = (q: string) => `%${q.replace(/[\\%_]/g, "\\$&")}%`;
 
 const toInboxMessage = (m: PagedMessage): InboxMessage => ({
   id: m.id,
@@ -103,6 +114,14 @@ export function conversationRoutes(deps: Deps) {
           eq(conversations.organizationId, c.get("org").id),
           query.status === "all" ? undefined : eq(conversations.status, query.status),
           query.appId ? eq(conversations.appId, query.appId) : undefined,
+          query.q
+            ? or(
+                ilike(devices.name, contains(query.q)),
+                ilike(devices.email, contains(query.q)),
+                ilike(devices.userIdExt, contains(query.q)),
+                ilike(messages.text, contains(query.q)),
+              )
+            : undefined,
           cursor
             ? sql`(${conversations.lastMessageAt}, ${conversations.id}) < (${cursor.at}::timestamptz, ${cursor.id}::uuid)`
             : undefined,
@@ -179,6 +198,13 @@ export function deviceRoutes(deps: Deps) {
   const { db } = deps;
   const r = new Hono<AppEnv>();
 
+  /** Devices are reached through the organization's live apps. */
+  const orgApps = (orgId: string) =>
+    db
+      .select({ id: apps.id })
+      .from(apps)
+      .where(and(eq(apps.organizationId, orgId), isNull(apps.deletedAt)));
+
   for (const [action, blocked] of [
     ["block", true],
     ["unblock", false],
@@ -187,15 +213,11 @@ export function deviceRoutes(deps: Deps) {
       const org = c.get("org");
       const id = c.req.param("id");
       if (!isUuid(id)) throw notFound("Device");
-      const orgApps = db
-        .select({ id: apps.id })
-        .from(apps)
-        .where(and(eq(apps.organizationId, org.id), isNull(apps.deletedAt)));
       const device = await db.transaction(async (tx) => {
         const [row] = await tx
           .update(devices)
           .set({ blocked, updatedAt: new Date() })
-          .where(and(eq(devices.id, id), inArray(devices.appId, orgApps)))
+          .where(and(eq(devices.id, id), inArray(devices.appId, orgApps(org.id))))
           .returning();
         if (row) {
           await tx.insert(auditEvents).values({
@@ -212,6 +234,32 @@ export function deviceRoutes(deps: Deps) {
       return c.json({ device: toInboxDevice(device) });
     });
   }
+
+  /** Deletes a user's device with its identity, metadata, conversations and messages. Admins only; audited. */
+  r.delete("/:id", requireOrgAdmin, async (c) => {
+    const org = c.get("org");
+    const id = c.req.param("id");
+    if (!isUuid(id)) throw notFound("Device");
+    const deleted = await db.transaction(async (tx) => {
+      const [row] = await tx
+        .delete(devices)
+        .where(and(eq(devices.id, id), inArray(devices.appId, orgApps(org.id))))
+        .returning({ id: devices.id, appId: devices.appId });
+      if (row) {
+        await tx.insert(auditEvents).values({
+          id: uuidv7(),
+          organizationId: org.id,
+          userId: c.get("user").id,
+          action: "device.deleted",
+          target: row.id,
+          metadata: { appId: row.appId },
+        });
+      }
+      return row;
+    });
+    if (!deleted) throw notFound("Device");
+    return c.body(null, 204);
+  });
 
   return r;
 }

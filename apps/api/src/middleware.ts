@@ -30,8 +30,10 @@ export const requireOrg = (deps: Deps) =>
     await next();
   });
 
+export const isAdminRole = (role: string) => role === "owner" || role === "admin";
+
 export const requireOrgAdmin = createMiddleware<AppEnv>(async (c, next) => {
-  if (!["owner", "admin"].includes(c.get("org").role)) {
+  if (!isAdminRole(c.get("org").role)) {
     throw new ApiError(403, "forbidden", "Only workspace owners and admins can do this");
   }
   await next();
@@ -48,10 +50,18 @@ export const requireDevice = (deps: Deps) =>
     if (!claims) throw new ApiError(401, "unauthorized", "Access token is missing, invalid or expired");
 
     const [row] = await deps.db
-      .select({ device: devices, organizationId: apps.organizationId })
+      .select({
+        device: devices,
+        app: {
+          id: apps.id,
+          organizationId: apps.organizationId,
+          onlyVerified: apps.onlyVerified,
+          identitySecretEnc: apps.identitySecretEnc,
+        },
+      })
       .from(devices)
       .innerJoin(apps, and(eq(apps.id, devices.appId), isNull(apps.deletedAt)))
-      .where(and(eq(devices.id, claims.deviceId), isNull(devices.deletedAt)))
+      .where(and(eq(devices.id, claims.deviceId), isNull(devices.deletedAt), isNull(devices.signedOutAt)))
       .limit(1);
     if (!row || row.device.appId !== claims.appId || row.device.sessionVersion !== claims.sessionVersion) {
       throw new ApiError(401, "unauthorized", "This device session has ended");
@@ -62,6 +72,6 @@ export const requireDevice = (deps: Deps) =>
       await deps.db.update(devices).set({ lastSeenAt: new Date() }).where(eq(devices.id, row.device.id));
     }
     c.set("device", row.device);
-    c.set("organizationId", row.organizationId);
+    c.set("app", row.app);
     await next();
   });

@@ -26,7 +26,7 @@ npm run dev:api        # http://localhost:8080
 npm run dev:dashboard  # http://localhost:3000
 ```
 
-No iOS SDK yet? `npx tsx apps/api/scripts/sdk-sim.ts --app app_… --say "Hello" --chat` plays an app user: it registers a device, sends messages, and prints team replies from the inbox.
+No iOS SDK yet? `npx tsx apps/api/scripts/sdk-sim.ts --app app_… --say "Hello" --chat` plays an app user: it registers a device, sends messages, and prints team replies from the inbox. `--user-id/--name/--email` identify the user (add `--verified` with `IDENTITY_SECRET` set to sign a token), `--meta key=value` sets custom fields, and `--logout` / `--delete` end the device.
 
 Checks (CI runs the same): `npm run typecheck && npm run lint && npm test && npm run build`.
 

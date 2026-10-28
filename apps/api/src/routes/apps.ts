@@ -1,11 +1,11 @@
-import { CreateAppInput, UpdateAppInput, type App as AppDto } from "@hshelby/contracts";
+import { CreateAppInput, RotateIdentitySecretInput, UpdateAppInput, type App as AppDto } from "@hshelby/contracts";
 import { buildSetupPrompt, decryptSecret, encryptSecret, newIdentitySecret, newPublicAppId, uuidv7 } from "@hshelby/core";
-import { apps, auditEvents } from "@hshelby/db";
+import { apps, auditEvents, devices } from "@hshelby/db";
 import { and, desc, eq, isNull } from "drizzle-orm";
 import { Hono } from "hono";
 import type { AppEnv, Deps } from "../context";
 import { ApiError, isUniqueViolation, notFound } from "../errors";
-import { requireOrgAdmin } from "../middleware";
+import { isAdminRole, requireOrgAdmin } from "../middleware";
 import { isUuid, parseJson } from "../validation";
 
 type AppRow = typeof apps.$inferSelect;
@@ -20,6 +20,8 @@ const toDto = (a: AppRow): AppDto => ({
   appStoreUrl: a.appStoreUrl,
   sellerName: a.sellerName,
   firstMessageAt: a.firstMessageAt?.toISOString() ?? null,
+  onlyVerified: a.onlyVerified,
+  identitySecretRotatedAt: a.identitySecretRotatedAt?.toISOString() ?? null,
   createdAt: a.createdAt.toISOString(),
 });
 
@@ -97,9 +99,29 @@ export function appRoutes(deps: Deps) {
 
   r.patch("/:id", async (c) => {
     const input = await parseJson(c, UpdateAppInput);
-    const app = await findApp(c.get("org").id, c.req.param("id"));
-    const [row] = await db.update(apps).set({ name: input.name, updatedAt: new Date() }).where(eq(apps.id, app.id)).returning();
-    return c.json({ app: toDto(row!) });
+    const org = c.get("org");
+    if (input.onlyVerified !== undefined && !isAdminRole(org.role)) {
+      throw new ApiError(403, "forbidden", "Only workspace owners and admins can change identity settings");
+    }
+    const app = await findApp(org.id, c.req.param("id"));
+    const row = await db.transaction(async (tx) => {
+      const [updated] = await tx
+        .update(apps)
+        .set({ name: input.name, onlyVerified: input.onlyVerified, updatedAt: new Date() })
+        .where(eq(apps.id, app.id))
+        .returning();
+      if (input.onlyVerified !== undefined && input.onlyVerified !== app.onlyVerified) {
+        await tx.insert(auditEvents).values({
+          id: uuidv7(),
+          organizationId: org.id,
+          userId: c.get("user").id,
+          action: input.onlyVerified ? "app.only_verified.enabled" : "app.only_verified.disabled",
+          target: app.id,
+        });
+      }
+      return updated!;
+    });
+    return c.json({ app: toDto(row) });
   });
 
   r.delete("/:id", requireOrgAdmin, async (c) => {
@@ -143,6 +165,40 @@ export function appRoutes(deps: Deps) {
     });
     c.header("Cache-Control", "no-store");
     return c.json({ secret: decryptSecret(app.identitySecretEnc, deps.keyring) });
+  });
+
+  /**
+   * Replaces the identity secret: tokens signed with the old one stop verifying at once. With
+   * `unverifyExisting` (for a leaked secret), every device of the app drops back to unverified.
+   */
+  r.post("/:id/identity-secret/rotate", requireOrgAdmin, async (c) => {
+    const { unverifyExisting } = await parseJson(c, RotateIdentitySecretInput);
+    const org = c.get("org");
+    const app = await findApp(org.id, c.req.param("id"));
+    const secret = newIdentitySecret();
+    await db.transaction(async (tx) => {
+      await tx
+        .update(apps)
+        .set({ identitySecretEnc: encryptSecret(secret, deps.keyring), identitySecretRotatedAt: new Date(), updatedAt: new Date() })
+        .where(eq(apps.id, app.id));
+      const unverified = unverifyExisting
+        ? await tx
+            .update(devices)
+            .set({ verified: false, updatedAt: new Date() })
+            .where(and(eq(devices.appId, app.id), eq(devices.verified, true)))
+            .returning({ id: devices.id })
+        : [];
+      await tx.insert(auditEvents).values({
+        id: uuidv7(),
+        organizationId: org.id,
+        userId: c.get("user").id,
+        action: "app.identity_secret.rotated",
+        target: app.id,
+        metadata: { unverifyExisting, unverifiedDevices: unverified.length },
+      });
+    });
+    c.header("Cache-Control", "no-store");
+    return c.json({ secret });
   });
 
   return r;

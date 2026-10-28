@@ -1,6 +1,7 @@
-import { randomBytes } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 import type { AppStoreResult } from "@hshelby/contracts";
 import type { AppStoreClient } from "@hshelby/core";
+import { expect } from "vitest";
 import { createApp } from "../src/app";
 import { createDeps } from "../src/deps";
 import { loadEnv } from "../src/env";
@@ -62,3 +63,40 @@ export async function signUp(app: TestApp, name = "Ada Lovelace") {
     });
   return { email, cookie, call };
 }
+
+export type TeamCall = Awaited<ReturnType<typeof signUp>>["call"];
+
+/** A signed-up owner with one app in their workspace. */
+export async function workspaceWithApp(app: TestApp, name = "Ada Lovelace") {
+  const team = await signUp(app, name);
+  const res = await team.call("/api/apps", { method: "POST", body: JSON.stringify({ name: `${name}'s app` }) });
+  const { app: created } = (await res.json()) as { app: { id: string; publicId: string } };
+  return { ...team, appId: created.id, publicId: created.publicId };
+}
+
+/**
+ * Registers a device the way the SDK does (`extra` adds to the registration body) and returns
+ * helpers that call /v1 with its access token.
+ */
+export async function registerDevice(app: TestApp, publicId: string, extra: Record<string, unknown> = {}) {
+  const res = await app.request("/v1/devices", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ appId: publicId, device: { model: "iPhone16,1" }, ...extra }),
+  });
+  expect(res.status).toBe(201);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- asserted on by the tests
+  const session = (await res.json()) as any;
+  let token: string = session.accessToken;
+  const sdk = (path: string, init: RequestInit & { json?: unknown } = {}) =>
+    app.request(path, {
+      ...init,
+      ...(init.json !== undefined ? { method: init.method ?? "POST", body: JSON.stringify(init.json) } : {}),
+      headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
+    });
+  const send = (text: string, clientId: string = randomUUID()) => sdk("/v1/messages", { json: { clientId, text } });
+  return { session, sdk, send, setToken: (t: string) => (token = t) };
+}
+
+export const reply = (call: TeamCall, conversationId: string, text: string, clientId = randomUUID()) =>
+  call(`/api/conversations/${conversationId}/messages`, { method: "POST", body: JSON.stringify({ clientId, text }) });

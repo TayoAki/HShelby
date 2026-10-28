@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { IdentityLabels, IdentityToken, Metadata, SdkIdentity } from "./identity";
 
 /* ---------- shared ---------- */
 
@@ -47,19 +48,31 @@ export const DeviceDetails = z
   .strict();
 export type DeviceDetails = z.infer<typeof DeviceDetails>;
 
+/** What registration and later updates can carry besides the App ID. Each part is optional. */
+const DeviceState = {
+  device: DeviceDetails.optional(),
+  identity: IdentityLabels.optional(),
+  identityToken: IdentityToken.optional(),
+  metadata: Metadata.optional(),
+};
+
 export const RegisterDeviceInput = z
-  .object({
-    appId: z.string().regex(/^app_[0-9A-Za-z]{22}$/),
-    device: DeviceDetails.default({}),
-  })
+  .object({ appId: z.string().regex(/^app_[0-9A-Za-z]{22}$/), ...DeviceState })
   .strict();
 export type RegisterDeviceInput = z.infer<typeof RegisterDeviceInput>;
+
+/** `PATCH /v1/device`: the SDK's staged state. Atomic: if the identity token is rejected, nothing changes. */
+export const DeviceUpdateInput = z.object(DeviceState).strict();
+export type DeviceUpdateInput = z.infer<typeof DeviceUpdateInput>;
+
+export const DeviceUpdateResult = z.object({ identity: SdkIdentity });
+export type DeviceUpdateResult = z.infer<typeof DeviceUpdateResult>;
 
 export const AccessToken = z.object({ accessToken: z.string(), expiresIn: z.number().int() });
 export type AccessToken = z.infer<typeof AccessToken>;
 
 /** Returned once at registration. The SDK stores `deviceSecret` in the Keychain and refreshes tokens with it. */
-export const DeviceSession = AccessToken.extend({ deviceSecret: z.string() });
+export const DeviceSession = AccessToken.extend({ deviceSecret: z.string(), identity: SdkIdentity });
 export type DeviceSession = z.infer<typeof DeviceSession>;
 
 export const RefreshInput = z.object({ deviceSecret: z.string().min(1).max(200) }).strict();
@@ -85,8 +98,17 @@ export const SdkConversation = z.object({
 });
 export type SdkConversation = z.infer<typeof SdkConversation>;
 
-/** `GET /v1/conversation`: null until the device sends its first message. */
+/** Whether the device may send, and why not: the SDK shows "Sign in to send messages." for verification_required. */
+export const SdkSending = z.object({
+  allowed: z.boolean(),
+  reason: z.enum(["device_blocked", "verification_required"]).nullable(),
+});
+export type SdkSending = z.infer<typeof SdkSending>;
+
+/** `GET /v1/conversation`: `conversation` is null until the device sends its first message. */
 export const SdkSync = z.object({
+  identity: SdkIdentity,
+  sending: SdkSending,
   conversation: SdkConversation.nullable(),
   messages: z.array(SdkMessage),
   hasMore: z.boolean(),
@@ -112,6 +134,15 @@ export const InboxDevice = z.object({
   blocked: z.boolean(),
   lastSeenAt: z.string().nullable(),
   createdAt: z.string(),
+  userId: z.string().nullable(),
+  name: z.string().nullable(),
+  email: z.string().nullable(),
+  /** True when the identity came from a valid token; labels alone are "Unverified". */
+  verified: z.boolean(),
+  verifiedAt: z.string().nullable(),
+  metadata: z.record(z.string(), z.string()),
+  /** The user logged out of this device: replies stay in the history but won't reach them. */
+  signedOutAt: z.string().nullable(),
 });
 export type InboxDevice = z.infer<typeof InboxDevice>;
 
@@ -130,6 +161,8 @@ export type InboxConversation = z.infer<typeof InboxConversation>;
 export const InboxListQuery = z.object({
   status: z.enum(["open", "closed", "all"]).default("open"),
   appId: z.uuid().optional(),
+  /** Matches name, email, user ID or the latest message, case-insensitively. */
+  q: z.string().trim().max(100).optional(),
   cursor: z.string().max(200).optional(),
   limit: z.coerce.number().int().min(1).max(100).default(30),
 });

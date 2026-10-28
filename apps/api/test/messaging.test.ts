@@ -4,50 +4,17 @@ import { auditEvents, devices, messages } from "@hshelby/db";
 import { eq } from "drizzle-orm";
 import { SignJWT } from "jose";
 import { afterAll, describe, expect, it } from "vitest";
-import { makeTestApp, signUp } from "./helpers";
+import { makeTestApp, registerDevice, reply, workspaceWithApp as workspaceIn } from "./helpers";
 
 const { app, deps, pool } = makeTestApp();
 afterAll(() => pool.end());
 
-type TestApp = typeof app;
-
-/** A signed-up teammate with one app in their workspace. */
-async function workspaceWithApp(name = "Ada Lovelace") {
-  const team = await signUp(app, name);
-  const res = await team.call("/api/apps", { method: "POST", body: JSON.stringify({ name: `${name}'s app` }) });
-  const { app: created } = (await res.json()) as any;
-  return { ...team, appId: created.id as string, publicId: created.publicId as string };
-}
-
-/** Registers a device the way the SDK does and returns a helper that calls /v1 with its access token. */
-async function registerDevice(target: TestApp, publicId: string, device: Record<string, string> = { model: "iPhone16,1" }) {
-  const res = await target.request("/v1/devices", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ appId: publicId, device }),
-  });
-  expect(res.status).toBe(201);
-  const session = (await res.json()) as any;
-  let token: string = session.accessToken;
-  const sdk = (path: string, init: RequestInit & { json?: unknown } = {}) =>
-    target.request(path, {
-      ...init,
-      ...(init.json !== undefined ? { method: init.method ?? "POST", body: JSON.stringify(init.json) } : {}),
-      headers: { "content-type": "application/json", authorization: `Bearer ${token}` },
-    });
-  const send = (text: string, clientId: string = randomUUID()) => sdk("/v1/messages", { json: { clientId, text } });
-  return { session, sdk, send, setToken: (t: string) => (token = t) };
-}
-
-type TeamCall = Awaited<ReturnType<typeof signUp>>["call"];
-
-const reply = (call: TeamCall, conversationId: string, text: string, clientId = randomUUID()) =>
-  call(`/api/conversations/${conversationId}/messages`, { method: "POST", body: JSON.stringify({ clientId, text }) });
+const workspaceWithApp = (name?: string) => workspaceIn(app, name);
 
 describe("device registration and tokens", () => {
   it("registers with a public App ID and stores only a hash of the device secret", async () => {
     const { publicId, appId } = await workspaceWithApp();
-    const { session } = await registerDevice(app, publicId, { model: "iPhone16,1", osVersion: "18.1", locale: "" });
+    const { session } = await registerDevice(app, publicId, { device: { model: "iPhone16,1", osVersion: "18.1", locale: "" } });
     expect(session.deviceSecret).toMatch(/^dvs_[0-9A-Za-z]{43}$/);
     expect(session.expiresIn).toBe(900);
 
@@ -116,7 +83,13 @@ describe("sending", () => {
     const device = await registerDevice(app, publicId);
 
     const empty = (await (await device.sdk("/v1/conversation")).json()) as any;
-    expect(empty).toEqual({ conversation: null, messages: [], hasMore: false });
+    expect(empty).toEqual({
+      identity: { userId: null, name: null, email: null, verified: false },
+      sending: { allowed: true, reason: null },
+      conversation: null,
+      messages: [],
+      hasMore: false,
+    });
 
     const res = await device.send("  Hello, is anyone there?  ");
     expect(res.status).toBe(201);
@@ -185,7 +158,7 @@ describe("sending", () => {
 describe("inbox and replies", () => {
   it("lists the conversation, takes a reply, and the SDK sees it on its next poll", async () => {
     const team = await workspaceWithApp();
-    const device = await registerDevice(app, team.publicId, { model: "iPhone15,2", appVersion: "2.3.0" });
+    const device = await registerDevice(app, team.publicId, { device: { model: "iPhone15,2", appVersion: "2.3.0" } });
     await device.send("My list won't sync");
     await device.send("Since this morning");
 

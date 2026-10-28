@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { index, jsonb, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
+import { boolean, index, jsonb, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 import { organizations, users } from "./auth";
 
 const ts = (name: string) => timestamp(name, { withTimezone: true, mode: "date" });
@@ -22,6 +22,8 @@ export const apps = pgTable(
     /** `ids_…` secret for identity verification, encrypted with the ENC_KEYS keyring. */
     identitySecretEnc: text("identity_secret_enc").notNull(),
     identitySecretRotatedAt: ts("identity_secret_rotated_at"),
+    /** "Only verified users can chat": unverified devices can read but not send. */
+    onlyVerified: boolean("only_verified").notNull().default(false),
     /** Set when the SDK delivers the app's first message (phase B1). */
     firstMessageAt: ts("first_message_at"),
     createdAt: ts("created_at").notNull().defaultNow(),

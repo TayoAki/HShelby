@@ -1,12 +1,16 @@
 import { sql } from "drizzle-orm";
-import { bigint, boolean, index, integer, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
+import { bigint, boolean, index, integer, jsonb, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 import { apps } from "./apps";
 import { organizations, users } from "./auth";
 
 const ts = (name: string) => timestamp(name, { withTimezone: true, mode: "date" });
 const seq = (name: string) => bigint(name, { mode: "number" });
 
-/** One install of an app, as the SDK registered it. Identity and push arrive in phases B3/B4. */
+/**
+ * One install of an app, as the SDK registered it. Identity is per device: the same user ID on two
+ * devices is two histories. Labels from `identify()` are unverified; a valid identity token sets
+ * `verified`, and from then on only another token can change who the device is.
+ */
 export const devices = pgTable(
   "devices",
   {
@@ -24,13 +28,26 @@ export const devices = pgTable(
     sdkVersion: text("sdk_version"),
     locale: text("locale"),
     timezone: text("timezone"),
+    /** The app's own user ID, from identify() or a verified token's `user_id`. */
+    userIdExt: text("user_id_ext"),
+    name: text("name"),
+    email: text("email"),
+    verified: boolean("verified").notNull().default(false),
+    /** The accepted claims of the latest identity token (never the token itself). */
+    verifiedClaims: jsonb("verified_claims").$type<Record<string, unknown>>(),
+    verifiedAt: ts("verified_at"),
+    /** setMetadata(): up to 20 string entries, replaced as a whole. */
+    metadata: jsonb("metadata").$type<Record<string, string>>().notNull().default({}),
     blocked: boolean("blocked").notNull().default(false),
     lastSeenAt: ts("last_seen_at"),
+    /** logout(): the credential is dead and the history stays; the app registers a new device next. */
+    signedOutAt: ts("signed_out_at"),
     createdAt: ts("created_at").notNull().defaultNow(),
     updatedAt: ts("updated_at").notNull().defaultNow(),
+    /** Unused: deleteData() removes the row. Kept until a later migration drops it. */
     deletedAt: ts("deleted_at"),
   },
-  (t) => [index("devices_app_idx").on(t.appId)],
+  (t) => [index("devices_app_idx").on(t.appId), index("devices_app_user_idx").on(t.appId, t.userIdExt)],
 );
 
 /**

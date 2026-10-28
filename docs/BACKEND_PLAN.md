@@ -27,7 +27,7 @@ Why one Postgres for everything at the start: messages, the job queue, realtime 
 
 ## Status
 
-**B0 and B1 run on Railway staging** (project `hshelby`, environment `staging`): dashboard at `https://dashboard-staging-0dee.up.railway.app`, API at `https://api-staging-f8f8.up.railway.app`.
+**B0, B1 and B4 run on Railway staging** (project `hshelby`, environment `staging`): dashboard at `https://dashboard-staging-0dee.up.railway.app`, API at `https://api-staging-f8f8.up.railway.app`.
 
 B1 (messaging core) as built:
 
@@ -37,7 +37,20 @@ B1 (messaging core) as built:
 - **Inbox API** (`apps/api/src/routes/inbox.ts`): conversations list (status/app filters, keyset cursor), detail, thread paging, reply, read, resolve/reopen, device block/unblock (audited). `conversations.organization_id` is denormalized from the app for the inbox index.
 - **Dashboard:** `/inbox` with a polled list and thread (optimistic replies, resolve, block, device details). Onboarding's "waiting for your first message" completes on the first real message.
 - **Try it without an app:** `npx tsx apps/api/scripts/sdk-sim.ts --app app_… --api <api url> --say "Hello" --chat` plays the SDK.
-- **Deferred to their phases:** identity and logout/delete (B4), push (B3), photos (B2), realtime (B6; polling until then), rate limits on `POST /v1/devices` (B12).
+- **Deferred to their phases:** push (B3), photos (B2), realtime (B6; polling until then), rate limits on `POST /v1/devices` (B12).
+
+B4 (identity and deletion) as built:
+
+- **Labels:** `identity: {userId, name, email}` on `POST /v1/devices` and `PATCH /v1/device` (now `{device, identity, identityToken, metadata}`, all optional, applied atomically). Omitted or empty fields keep the server's value. Labels never change a verified device.
+- **Verified identity** (`apps/api/src/identity.ts`): HS256 only, keyed with the app's `ids_…` secret verbatim; `user_id` (string ≤255 or safe integer) and `exp` required, future `nbf` refused, 30 s clock tolerance, tokens ≤4,096 characters. `name`/`email` kept when valid, other claims ignored. The device stores the accepted claims, never the token. Errors: `identity_token_invalid` / `identity_token_expired` (422). Test vectors are in `apps/api/test/identity.test.ts`.
+- **One user per device:** a different user ID for a device that has one is `identity_mismatch` (409); the app logs out and registers again. Guest → signed-in keeps the conversation.
+- **Metadata:** whole-dictionary replace, ≤20 entries, keys 1–64, values ≤512, strings only. `revenuecat_id`, `superwall_id`, `adapty_id` survive updates that omit them.
+- **Only verified users can chat** (`apps.only_verified`, admin setting, audited): unverified devices get `verification_required` (403) on send; `GET /v1/conversation` returns `sending: {allowed, reason}` and `identity` so the SDK can say "Sign in to send messages."
+- **Secret rotation:** `POST /api/apps/:id/identity-secret/rotate {unverifyExisting}` (admin, audited) invalidates old tokens at once.
+- **Logout:** `POST /v1/session/logout {deviceSecret}` ends the device (credential dead, history kept, idempotent). The SDK registers a new device next, which starts a new chat; the inbox marks the old one signed out.
+- **Delete:** `DELETE /v1/device` and admin `DELETE /api/devices/:id` (audited) remove the device with its conversations and messages in one statement (foreign-key cascades). Deleted apps are purged by the worker's `purge.deleted-apps` job every 15 minutes, in batches.
+- **Dashboard:** names, emails and a verified seal in the inbox, search (name, email, user ID, latest message), user and custom-field details, a signed-out notice, admin "Delete user data", and an app Settings page for the secret, rotation and only-verified mode. The setup prompt gains an identity-verification step.
+- **Not yet:** `devices.deleted_at` is unused and will be dropped in a later migration (dropping it now would break the running version mid-deploy).
 
 Where B0 differs from the plan below:
 
@@ -361,7 +374,7 @@ Each phase ends with acceptance tests that must pass in CI and on staging.
 | **B1 Messaging core** (done, see Status) | Device register/refresh, conversation sync, send with seq + idempotency, read/unread, inbox list/thread/reply/resolve/block | A script acting as the SDK sends 200 concurrent messages with 20% retried `clientId`s → exactly 200 rows, seq 1–200 with no gaps; a dashboard reply shows up on the next poll | 2 wks |
 | **B2 Photos** | Presign, verify, signed GET, nightly cleanup | A wrong checksum is rejected; a pending upload disappears after 24h in a time-travel test | 0.5–1 wk |
 | **B3 Push** | `.p8` upload, `push.send`, env per device, templates, badge, issue capture, "send test" | Real device gets a push in sandbox and production builds; a revoked token clears itself | 1 wk |
-| **B4 Identity & deletion** | `identify` labels, metadata limits, JWT verification, only-verified mode, logout/delete + `purge.scope` | JWT test vectors from the docs pass; a deleted device's rows and objects are gone | 1 wk |
+| **B4 Identity & deletion** (done, see Status) | `identify` labels, metadata limits, JWT verification, only-verified mode, logout/delete + `purge.scope` | JWT test vectors from the docs pass; a deleted device's rows and objects are gone | 1 wk |
 | **B5 Billing** | Stripe Checkout/Portal/webhooks, gating middleware, founder-spot counter | Test-mode subscription toggles reply access; users can still send while lapsed | 0.5–1 wk |
 | **MVP backend** | | | **≈ 6–7 wks** |
 | **B6 Realtime** | WS gateway, LISTEN/NOTIFY fan-out, typing, presence, skip-push-when-in-chat | Two API instances: a reply sent via instance A reaches a socket on B in < 300 ms | 1–1.5 wks |

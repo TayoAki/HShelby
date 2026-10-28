@@ -1,4 +1,4 @@
-import { brand } from "@hshelby/contracts";
+import { brand, IDENTITY_SECRET_ENV } from "@hshelby/contracts";
 
 export type SetupPromptConfig = {
   appName: string;
@@ -46,14 +46,23 @@ export function buildSetupPrompt(c: SetupPromptConfig): string {
     "Build the entry as a copy of an existing control on that screen. Show the unread count as a badge; hide it at zero.",
     "",
     "## 5. Connect what the app already has",
-    "Identify signed-in users (ID, name, email the app already knows); call logout on sign-out and deleteData on account deletion.",
-    "Send the chosen user details as metadata. Forward the APNs device token if the app already has notification permission; never add a permission prompt.",
+    "Apps with sign-in: identify(userId, name, email) after restoring a session and after sign-in, with what the app already knows. Apps without accounts: identify with just the name the user entered, if any.",
+    "Call logout only where a signed-in session really ends (sign-out, account switch), before the next user's identify; never for guests. On account deletion, await deleteData() before discarding the session.",
+    "Send the chosen user details with setMetadata: up to 20 string values, and each call replaces all of them, so set them in one place. Names and emails go only through identify.",
+    "Forward the APNs device token if the app already has notification permission; never add a permission prompt.",
     "",
     "## 6. Build and check",
     "Build for an iOS simulator, launch the app, open Support and send a test message.",
     "It should appear in the dashboard inbox. Report exactly what you saw; never claim a check passed if you couldn't run it.",
     "",
-    "## 7. Wrap up",
+    "## 7. Offer identity verification",
+    "Only if the app has real sign-in and a backend that can sign tokens. Ask the developer whether to set it up now or later.",
+    "If now: add an authenticated backend endpoint that returns an HS256 JWT signed with the app's identity secret, used verbatim including its ids_ prefix.",
+    "Claims: user_id (required), exp (required; 7 days), name and email (optional). The user comes from the session, never from the request.",
+    `The developer reveals the secret in the dashboard (the app's Settings, Identity verification) and stores it on the server as ${IDENTITY_SECRET_ENV}; never in the app or the chat.`,
+    "The app passes the token to identify(token:) after sign-in and on every launch.",
+    "",
+    "## 8. Wrap up",
     "Summarize what changed, what you verified, and what is left for the developer (push credentials, privacy labels, the commit).",
     "Never put secrets or customer data in a message.",
   ];

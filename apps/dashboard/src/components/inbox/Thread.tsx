@@ -3,12 +3,15 @@
 import { MESSAGE_MAX_LENGTH, type InboxConversation, type InboxMessage, type InboxThread } from "@hshelby/contracts";
 import { ArrowLeftIcon, ArrowUpIcon } from "@radix-ui/react-icons";
 import Link from "next/link";
-import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { useRouter } from "next/navigation";
+import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { AppIcon, ErrorNote, Spinner } from "@/components/ui";
 import { api, ApiError } from "@/lib/api";
 import { authClient } from "@/lib/auth-client";
 import { clockTime, dayLabel, localTimeIn, relativeTime, sameDay } from "@/lib/time";
+import { isAdmin, useMe } from "@/lib/use-me";
 import { useVisibleInterval } from "@/lib/use-visible-interval";
+import { IdentityBadge } from "./Identity";
 import { deviceLabel, useInbox } from "./InboxContext";
 
 /** A stored message, or one of ours still on its way (no seq yet). */
@@ -39,14 +42,27 @@ function endsGroup(m: Item, next: Item | undefined) {
 function Detail({ label, value }: { label: string; value: string | null }) {
   return (
     <div className="flex justify-between gap-4 py-2 text-[13px]">
-      <dt className="text-secondary">{label}</dt>
-      <dd className="truncate text-right">{value ?? "—"}</dd>
+      <dt className="shrink-0 text-secondary">{label}</dt>
+      <dd className="truncate text-right" title={value ?? undefined}>
+        {value ?? "—"}
+      </dd>
     </div>
+  );
+}
+
+function DetailsSection({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <section className="mb-5">
+      <h2 className="text-[13px] text-secondary">{title}</h2>
+      <dl className="mt-1 divide-y divide-line">{children}</dl>
+    </section>
   );
 }
 
 export function Thread({ conversationId }: { conversationId: string }) {
   const { refresh } = useInbox();
+  const router = useRouter();
+  const me = useMe();
   const { data: session } = authClient.useSession();
   const [conversation, setConversation] = useState<InboxConversation | null>(null);
   const [items, setItems] = useState<Item[]>([]);
@@ -187,6 +203,21 @@ export function Thread({ conversationId }: { conversationId: string }) {
     }
   }
 
+  async function deleteUserData() {
+    if (!conversation) return;
+    const ok = window.confirm(
+      "Delete this user's data? Their device record, identity, custom fields and every conversation and message are removed for good.",
+    );
+    if (!ok) return;
+    try {
+      await api(`/devices/${conversation.device.id}`, { method: "DELETE" });
+      refresh();
+      router.push("/inbox");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Couldn't delete this user's data");
+    }
+  }
+
   if (missing) {
     return (
       <div className="flex flex-1 items-center justify-center p-8 text-center text-[14px] text-secondary">
@@ -210,10 +241,12 @@ export function Thread({ conversationId }: { conversationId: string }) {
           </Link>
           <AppIcon app={app} size={36} />
           <div className="min-w-0 flex-1">
-            <p className="truncate text-[16px]">{deviceLabel(device)}</p>
+            <p className="flex items-center gap-1.5 text-[16px]">
+              <span className="truncate">{deviceLabel(device)}</span>
+              <IdentityBadge device={device} />
+            </p>
             <p className="truncate text-[13px] text-secondary">
-              {app.name} · {device.model ?? "iOS device"}
-              {!open && " · Resolved"}
+              {[device.name && device.email, app.name, device.model ?? "iOS device", !open && "Resolved"].filter(Boolean).join(" · ")}
             </p>
           </div>
           <button
@@ -287,6 +320,11 @@ export function Thread({ conversationId }: { conversationId: string }) {
             <ErrorNote>{error}</ErrorNote>
           </div>
         )}
+        {device.signedOutAt && (
+          <p className="mx-5 mb-2 rounded-2xl bg-panel px-4 py-3 text-[13px] text-secondary">
+            This user logged out of this device. The conversation stays here, but new replies won&apos;t reach them.
+          </p>
+        )}
         {device.blocked && (
           <p className="mx-5 mb-2 rounded-2xl bg-panel px-4 py-3 text-[13px] text-secondary">
             This user is blocked: they can read replies but can&apos;t send messages.{" "}
@@ -323,8 +361,31 @@ export function Thread({ conversationId }: { conversationId: string }) {
       </section>
 
       <aside className="hidden w-[280px] shrink-0 overflow-y-auto border-l border-line px-5 py-4 xl:block">
-        <p className="text-[13px] text-secondary">Details</p>
-        <dl className="mt-2 divide-y divide-line">
+        <DetailsSection title="User">
+          <Detail label="Name" value={device.name} />
+          <Detail label="Email" value={device.email} />
+          <Detail label="User ID" value={device.userId} />
+          <Detail
+            label="Identity"
+            value={
+              device.verified
+                ? `Verified${device.verifiedAt ? ` ${relativeTime(device.verifiedAt)}` : ""}`
+                : device.userId || device.name || device.email
+                  ? "Unverified"
+                  : "Anonymous"
+            }
+          />
+        </DetailsSection>
+        {Object.keys(device.metadata).length > 0 && (
+          <DetailsSection title="Custom fields">
+            {Object.entries(device.metadata)
+              .sort(([a], [b]) => a.localeCompare(b))
+              .map(([key, value]) => (
+                <Detail key={key} label={key} value={value} />
+              ))}
+          </DetailsSection>
+        )}
+        <DetailsSection title="Device">
           <Detail label="App" value={app.name} />
           <Detail label="Device" value={device.model} />
           <Detail label="iOS" value={device.osVersion} />
@@ -335,14 +396,25 @@ export function Thread({ conversationId }: { conversationId: string }) {
           <Detail label="Time zone" value={device.timezone} />
           <Detail label="First seen" value={relativeTime(device.createdAt)} />
           <Detail label="Last active" value={device.lastSeenAt ? relativeTime(device.lastSeenAt) : null} />
-        </dl>
-        <button
-          type="button"
-          onClick={() => setBlocked(!device.blocked)}
-          className="mt-4 text-[13px] text-secondary underline-offset-4 hover:text-fg hover:underline"
-        >
-          {device.blocked ? "Unblock user" : "Block user"}
-        </button>
+        </DetailsSection>
+        <div className="flex flex-col items-start gap-2">
+          <button
+            type="button"
+            onClick={() => setBlocked(!device.blocked)}
+            className="text-[13px] text-secondary underline-offset-4 hover:text-fg hover:underline"
+          >
+            {device.blocked ? "Unblock user" : "Block user"}
+          </button>
+          {isAdmin(me) && (
+            <button
+              type="button"
+              onClick={deleteUserData}
+              className="text-[13px] text-[#b42318] underline-offset-4 hover:underline"
+            >
+              Delete user data
+            </button>
+          )}
+        </div>
       </aside>
     </div>
   );

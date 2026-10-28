@@ -3,6 +3,9 @@ import { z } from "zod";
 /** Working product name. Change it here; every surface reads it from this constant. */
 export const brand = { name: "hshelby" } as const;
 
+/** Where developers keep an app's identity secret on their server. */
+export const IDENTITY_SECRET_ENV = `${brand.name.toUpperCase()}_IDENTITY_SECRET`;
+
 /* ---------- errors ---------- */
 
 export const errorCodes = [
@@ -16,6 +19,11 @@ export const errorCodes = [
   "billing_not_configured",
   "device_blocked",
   "client_id_reused",
+  "identity_token_invalid",
+  "identity_token_expired",
+  "identity_mismatch",
+  "verification_required",
+  "delete_failed",
   "internal_error",
 ] as const;
 export type ErrorCode = (typeof errorCodes)[number];
@@ -49,6 +57,8 @@ export const App = z.object({
   appStoreUrl: z.string().nullable(),
   sellerName: z.string().nullable(),
   firstMessageAt: z.string().nullable(),
+  onlyVerified: z.boolean(),
+  identitySecretRotatedAt: z.string().nullable(),
   createdAt: z.string(),
 });
 export type App = z.infer<typeof App>;
@@ -60,7 +70,12 @@ export const CreateAppInput = z.union([
 ]);
 export type CreateAppInput = z.infer<typeof CreateAppInput>;
 
-export const UpdateAppInput = z.object({ name: z.string().trim().min(1).max(100) }).strict();
+/** Name for any member; onlyVerified for owners and admins. */
+export const UpdateAppInput = z
+  .object({ name: z.string().trim().min(1).max(100), onlyVerified: z.boolean() })
+  .partial()
+  .strict()
+  .refine((v) => Object.keys(v).length > 0, { message: "nothing to update" });
 export type UpdateAppInput = z.infer<typeof UpdateAppInput>;
 
 export const AppStatus = z.object({ firstMessageAt: z.string().nullable() });
@@ -96,4 +111,5 @@ export const BillingConfig = z.object({
 });
 export type BillingConfig = z.infer<typeof BillingConfig>;
 
+export * from "./identity";
 export * from "./messaging";

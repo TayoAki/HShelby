@@ -67,6 +67,9 @@ export default function AppsPage() {
                 <Link href={`/onboarding/${app.id}/connect`} className="text-[14px] underline-offset-4 hover:underline">
                   Setup
                 </Link>
+                <Link href={`/apps/${app.id}/settings`} className="text-[14px] underline-offset-4 hover:underline">
+                  Settings
+                </Link>
               </li>
             ))}
           </ul>

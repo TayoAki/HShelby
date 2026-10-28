@@ -13,5 +13,6 @@ export const InboxContext = createContext<InboxState>({ conversations: null, ref
 
 export const useInbox = () => use(InboxContext);
 
-/** Until identify() lands (phase B4), users are anonymous; the device ID's tail tells them apart. */
-export const deviceLabel = (device: Pick<InboxDevice, "id">) => `Anonymous · ${device.id.slice(-4).toUpperCase()}`;
+/** The best name the app gave us; anonymous users are told apart by the device ID's tail. */
+export const deviceLabel = (device: Pick<InboxDevice, "id" | "name" | "email" | "userId">) =>
+  device.name ?? device.email ?? (device.userId ? `User ${device.userId}` : `Anonymous · ${device.id.slice(-4).toUpperCase()}`);
