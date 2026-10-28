@@ -1,5 +1,5 @@
 import type { AppStoreClient, Keyring } from "@hshelby/core";
-import type { Db } from "@hshelby/db";
+import type { Db, devices } from "@hshelby/db";
 import type { Logger } from "pino";
 import type { Auth } from "./auth";
 import type { Env } from "./env";
@@ -11,6 +11,8 @@ export type Deps = {
   logger: Logger;
   keyring: Keyring;
   appStore: AppStoreClient;
+  /** HS256 key for SDK access tokens. */
+  deviceTokenKey: Uint8Array;
 };
 
 type SessionResult = NonNullable<Awaited<ReturnType<Auth["api"]["getSession"]>>>;
@@ -21,5 +23,14 @@ export type AppEnv = {
     user: SessionResult["user"];
     session: SessionResult["session"];
     org: { id: string; role: string };
+  };
+};
+
+/** Context for the SDK routes under /v1, authenticated by a device access token. */
+export type SdkEnv = {
+  Variables: {
+    requestId: string;
+    device: typeof devices.$inferSelect;
+    organizationId: string;
   };
 };

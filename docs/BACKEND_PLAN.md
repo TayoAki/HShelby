@@ -27,7 +27,17 @@ Why one Postgres for everything at the start: messages, the job queue, realtime 
 
 ## Status
 
-**B0 runs on Railway staging** (project `hshelby`, environment `staging`): dashboard at `https://dashboard-staging-0dee.up.railway.app`, API at `https://api-staging-f8f8.up.railway.app`.
+**B0 and B1 run on Railway staging** (project `hshelby`, environment `staging`): dashboard at `https://dashboard-staging-0dee.up.railway.app`, API at `https://api-staging-f8f8.up.railway.app`.
+
+B1 (messaging core) as built:
+
+- **SDK API** (`apps/api/src/routes/sdk.ts`): `POST /v1/devices`, `POST /v1/session/refresh`, `PATCH /v1/device`, `GET /v1/conversation?after|before|limit`, `POST /v1/messages`, `POST /v1/read`, `GET /v1/unread`. Device secrets are `dvs_` + 43 chars, stored as SHA-256. Access tokens are 15-minute HS256 JWTs with a key derived (HKDF) from `BETTER_AUTH_SECRET`, so no extra secret to manage; every request re-checks the device, its app and its session version.
+- **Ordering and idempotency** (`apps/api/src/messaging.ts`): the §5.2 transaction. The acceptance test (200 concurrent sends, 20% retried `clientId`s → exactly 200 rows, seq 1–200) is in `apps/api/test/messaging.test.ts`. Teammates' replies are idempotent per author and `clientId`.
+- **Unread:** each side has a read cursor (`user_read_seq`, `team_read_seq`) and a counter. Sending or replying reads your own side; a read locks the row, then recounts.
+- **Inbox API** (`apps/api/src/routes/inbox.ts`): conversations list (status/app filters, keyset cursor), detail, thread paging, reply, read, resolve/reopen, device block/unblock (audited). `conversations.organization_id` is denormalized from the app for the inbox index.
+- **Dashboard:** `/inbox` with a polled list and thread (optimistic replies, resolve, block, device details). Onboarding's "waiting for your first message" completes on the first real message.
+- **Try it without an app:** `npx tsx apps/api/scripts/sdk-sim.ts --app app_… --api <api url> --say "Hello" --chat` plays the SDK.
+- **Deferred to their phases:** identity and logout/delete (B4), push (B3), photos (B2), realtime (B6; polling until then), rate limits on `POST /v1/devices` (B12).
 
 Where B0 differs from the plan below:
 
@@ -348,7 +358,7 @@ Each phase ends with acceptance tests that must pass in CI and on staging.
 | Phase | Scope | Done when | Effort |
 |---|---|---|---|
 | **B0 Foundations** (done, see Status) | Monorepo, move landing page to `apps/web`, Postgres + Drizzle migrations, Hono skeleton with error envelope, `contracts` → OpenAPI, Better Auth (Google), orgs/members/invitations/apps CRUD, encryption util, pino logs + Sentry, Railway staging deploy with migrate-on-deploy, CI | A teammate signs in with Google, creates an org and an app, and sees its `app_…` ID on staging | 1 wk |
-| **B1 Messaging core** | Device register/refresh, conversation sync, send with seq + idempotency, read/unread, inbox list/thread/reply/resolve/block | A script acting as the SDK sends 200 concurrent messages with 20% retried `clientId`s → exactly 200 rows, seq 1–200 with no gaps; a dashboard reply shows up on the next poll | 2 wks |
+| **B1 Messaging core** (done, see Status) | Device register/refresh, conversation sync, send with seq + idempotency, read/unread, inbox list/thread/reply/resolve/block | A script acting as the SDK sends 200 concurrent messages with 20% retried `clientId`s → exactly 200 rows, seq 1–200 with no gaps; a dashboard reply shows up on the next poll | 2 wks |
 | **B2 Photos** | Presign, verify, signed GET, nightly cleanup | A wrong checksum is rejected; a pending upload disappears after 24h in a time-travel test | 0.5–1 wk |
 | **B3 Push** | `.p8` upload, `push.send`, env per device, templates, badge, issue capture, "send test" | Real device gets a push in sandbox and production builds; a revoked token clears itself | 1 wk |
 | **B4 Identity & deletion** | `identify` labels, metadata limits, JWT verification, only-verified mode, logout/delete + `purge.scope` | JWT test vectors from the docs pass; a deleted device's rows and objects are gone | 1 wk |

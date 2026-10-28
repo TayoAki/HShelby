@@ -1,7 +1,8 @@
-import { members } from "@hshelby/db";
-import { and, eq } from "drizzle-orm";
+import { apps, devices, members } from "@hshelby/db";
+import { and, eq, isNull } from "drizzle-orm";
 import { createMiddleware } from "hono/factory";
-import type { AppEnv, Deps } from "./context";
+import type { AppEnv, Deps, SdkEnv } from "./context";
+import { verifyAccessToken } from "./device-tokens";
 import { ApiError } from "./errors";
 
 /** Loads the Better Auth session; 401 without one. */
@@ -35,3 +36,32 @@ export const requireOrgAdmin = createMiddleware<AppEnv>(async (c, next) => {
   }
   await next();
 });
+
+/**
+ * SDK routes: a valid access token for a live device of a live app, with the device's current session version.
+ * A 401 tells the SDK to refresh with its device secret (or register again if that fails too).
+ */
+export const requireDevice = (deps: Deps) =>
+  createMiddleware<SdkEnv>(async (c, next) => {
+    const header = c.req.header("authorization");
+    const claims = header?.startsWith("Bearer ") ? await verifyAccessToken(deps.deviceTokenKey, header.slice(7)) : null;
+    if (!claims) throw new ApiError(401, "unauthorized", "Access token is missing, invalid or expired");
+
+    const [row] = await deps.db
+      .select({ device: devices, organizationId: apps.organizationId })
+      .from(devices)
+      .innerJoin(apps, and(eq(apps.id, devices.appId), isNull(apps.deletedAt)))
+      .where(and(eq(devices.id, claims.deviceId), isNull(devices.deletedAt)))
+      .limit(1);
+    if (!row || row.device.appId !== claims.appId || row.device.sessionVersion !== claims.sessionVersion) {
+      throw new ApiError(401, "unauthorized", "This device session has ended");
+    }
+
+    // last-seen at most once a minute, so polling doesn't write on every request
+    if (!row.device.lastSeenAt || Date.now() - row.device.lastSeenAt.getTime() > 60_000) {
+      await deps.db.update(devices).set({ lastSeenAt: new Date() }).where(eq(devices.id, row.device.id));
+    }
+    c.set("device", row.device);
+    c.set("organizationId", row.organizationId);
+    await next();
+  });

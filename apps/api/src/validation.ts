@@ -16,3 +16,15 @@ export async function parseJson<T extends z.ZodType>(c: Context, schema: T): Pro
   }
   return result.data;
 }
+
+export function parseQuery<T extends z.ZodType>(c: Context, schema: T): z.infer<T> {
+  const result = schema.safeParse(c.req.query());
+  if (!result.success) {
+    const message = result.error.issues.map((i) => `${i.path.join(".") || "query"}: ${i.message}`).join("; ");
+    throw new ApiError(400, "validation_failed", message);
+  }
+  return result.data;
+}
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+export const isUuid = (value: string) => UUID.test(value);

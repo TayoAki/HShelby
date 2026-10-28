@@ -14,6 +14,8 @@ export const errorCodes = [
   "app_already_added",
   "app_store_unavailable",
   "billing_not_configured",
+  "device_blocked",
+  "client_id_reused",
   "internal_error",
 ] as const;
 export type ErrorCode = (typeof errorCodes)[number];
@@ -93,3 +95,5 @@ export const BillingConfig = z.object({
     .nullable(),
 });
 export type BillingConfig = z.infer<typeof BillingConfig>;
+
+export * from "./messaging";

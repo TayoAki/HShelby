@@ -3,11 +3,13 @@ import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { requestId } from "hono/request-id";
 import { secureHeaders } from "hono/secure-headers";
-import type { AppEnv, Deps } from "./context";
+import type { AppEnv, Deps, SdkEnv } from "./context";
 import { ApiError } from "./errors";
 import { requireOrg, requireSession } from "./middleware";
 import { accountRoutes } from "./routes/account";
 import { appRoutes } from "./routes/apps";
+import { conversationRoutes, deviceRoutes } from "./routes/inbox";
+import { sdkRoutes } from "./routes/sdk";
 
 export function createApp(deps: Deps) {
   const app = new Hono<AppEnv>();
@@ -32,15 +34,27 @@ export function createApp(deps: Deps) {
   // Better Auth owns /api/auth/* (sign-up, sign-in, sessions, organizations, Stripe webhooks).
   app.on(["GET", "POST"], "/api/auth/*", (c) => deps.auth.handler(c.req.raw));
 
+  const limitBody = (kb: number) =>
+    bodyLimit({
+      maxSize: kb * 1024,
+      onError: (c) => c.json({ error: { code: "validation_failed", message: "Body too large" } }, 413),
+    });
+
+  // Dashboard API: Better Auth session cookie, scoped to the active organization.
   const api = new Hono<AppEnv>();
-  api.use(
-    "*",
-    bodyLimit({ maxSize: 64 * 1024, onError: (c) => c.json({ error: { code: "validation_failed", message: "Body too large" } }, 413) }),
-  );
+  api.use("*", limitBody(64));
   api.use("*", requireSession(deps), requireOrg(deps));
   api.route("/", accountRoutes(deps));
   api.route("/apps", appRoutes(deps));
+  api.route("/conversations", conversationRoutes(deps));
+  api.route("/devices", deviceRoutes(deps));
   app.route("/api", api);
+
+  // SDK API: device access tokens (see routes/sdk.ts).
+  const v1 = new Hono<SdkEnv>();
+  v1.use("*", limitBody(32));
+  v1.route("/", sdkRoutes(deps));
+  app.route("/v1", v1);
 
   app.notFound((c) => c.json({ error: { code: "not_found", message: "Route not found" } }, 404));
 

@@ -29,3 +29,6 @@ export function uuidv7(now = Date.now()): string {
   const hex = bytes.toString("hex");
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
+
+/** Device secret the SDK keeps in the Keychain: `dvs_` + 43 chars (~256 bits). Only its SHA-256 is stored. */
+export const newDeviceSecret = () => `dvs_${base62(43)}`;

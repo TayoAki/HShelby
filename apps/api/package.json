@@ -6,16 +6,17 @@
   "dependencies": {
     "@better-auth/stripe": "^1.7.14",
     "@hono/node-server": "^2.1.5",
+    "@hshelby/contracts": "*",
+    "@hshelby/core": "*",
+    "@hshelby/db": "*",
     "better-auth": "^1.7.14",
     "drizzle-orm": "^0.45.4",
     "hono": "^4.13.14",
+    "jose": "^6.2.13",
     "pg": "^8.23.1",
     "pino": "^9.14.0",
     "stripe": "^23.0.1",
-    "zod": "^4.6.7",
-    "@hshelby/contracts": "*",
-    "@hshelby/core": "*",
-    "@hshelby/db": "*"
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@types/node": "^22.20.5",

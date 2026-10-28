@@ -4,9 +4,9 @@ In-app support chat for iOS apps, modelled on a study of [reception.sh](https://
 
 | Path | What |
 |---|---|
-| `apps/api` | Hono API. Better Auth (email + password, organizations, Stripe test-mode subscriptions) at `/api/auth/*`, org-scoped app routes at `/api/*`. |
+| `apps/api` | Hono API. Better Auth (email + password, organizations, Stripe test-mode subscriptions) at `/api/auth/*`, the dashboard's org-scoped routes (apps, inbox) at `/api/*`, the SDK's at `/v1/*`. |
 | `apps/worker` | pg-boss jobs and cron (nightly cleanup). |
-| `apps/dashboard` | Next.js dashboard: sign-up/in and the onboarding flow (Add app → Connect → Integrations → Subscribe). |
+| `apps/dashboard` | Next.js dashboard: sign-up/in, onboarding (Add app → Connect → Integrations → Subscribe), and the team inbox. |
 | `apps/web` | Landing-page clone from the study. Not deployed: it reproduces another company's brand. |
 | `packages/*` | `db` (Drizzle schema + migrations), `contracts` (Zod schemas), `core` (IDs, encryption, App Store client, setup prompt), `ui` (phone and chat mock). |
 | [`docs/BACKEND_PLAN.md`](docs/BACKEND_PLAN.md) | Stack, data model, API contract and phased schedule. Its Status section covers what runs on Railway staging and the variables each service needs. |
@@ -25,6 +25,8 @@ npm run db:migrate     # DATABASE_URL, default postgres://postgres@localhost:543
 npm run dev:api        # http://localhost:8080
 npm run dev:dashboard  # http://localhost:3000
 ```
+
+No iOS SDK yet? `npx tsx apps/api/scripts/sdk-sim.ts --app app_… --say "Hello" --chat` plays an app user: it registers a device, sends messages, and prints team replies from the inbox.
 
 Checks (CI runs the same): `npm run typecheck && npm run lint && npm test && npm run build`.
 

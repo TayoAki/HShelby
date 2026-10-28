@@ -23,3 +23,6 @@ coverage/
 *.pem
 npm-debug.log*
 .vercel
+
+# apps/api/scripts/sdk-sim.ts device state
+.sdk-sim/

@@ -2,12 +2,11 @@
 
 import type { App, Me } from "@hshelby/contracts";
 import { CheckIcon, CopyIcon, PlusIcon } from "@radix-ui/react-icons";
-import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import { SignOutButton } from "@/components/AuthGate";
-import { BrandMark, ErrorNote, Spinner } from "@/components/ui";
+import { AppHeader } from "@/components/AppHeader";
+import { AppIcon, ErrorNote, Spinner } from "@/components/ui";
 import { api } from "@/lib/api";
 import { useCopy } from "@/lib/use-copy";
 
@@ -40,15 +39,7 @@ export default function AppsPage() {
 
   return (
     <div className="mx-auto max-w-4xl px-5 pb-16">
-      <header className="flex h-20 items-center justify-between">
-        <Link href="/apps" className="text-[22px]">
-          <BrandMark />
-        </Link>
-        <div className="flex items-center gap-6">
-          {me && <span className="hidden text-[14px] text-secondary sm:inline">{me.user.email}</span>}
-          <SignOutButton />
-        </div>
-      </header>
+      <AppHeader className="h-20" />
 
       {error && <ErrorNote>{error}</ErrorNote>}
       {!apps && !error && <Spinner />}
@@ -67,11 +58,7 @@ export default function AppsPage() {
           <ul className="mt-8 space-y-3">
             {apps.map((app) => (
               <li key={app.id} className="flex flex-wrap items-center gap-4 rounded-[28px] bg-panel p-4 pr-6">
-                {app.iconUrl ? (
-                  <Image src={app.iconUrl} alt="" width={56} height={56} unoptimized className="size-14 rounded-[22%] outline outline-1 -outline-offset-1 outline-black/5" />
-                ) : (
-                  <span className="flex size-14 items-center justify-center rounded-[22%] bg-white text-[22px] text-secondary">{app.name[0]}</span>
-                )}
+                <AppIcon app={app} />
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-[17px]">{app.name}</p>
                   <p className="text-[13px] text-secondary">{app.firstMessageAt ? "Connected" : "Waiting for the first message"}</p>

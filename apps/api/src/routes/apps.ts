@@ -4,9 +4,9 @@ import { apps, auditEvents } from "@hshelby/db";
 import { and, desc, eq, isNull } from "drizzle-orm";
 import { Hono } from "hono";
 import type { AppEnv, Deps } from "../context";
-import { ApiError, notFound } from "../errors";
+import { ApiError, isUniqueViolation, notFound } from "../errors";
 import { requireOrgAdmin } from "../middleware";
-import { parseJson } from "../validation";
+import { isUuid, parseJson } from "../validation";
 
 type AppRow = typeof apps.$inferSelect;
 
@@ -23,22 +23,13 @@ const toDto = (a: AppRow): AppDto => ({
   createdAt: a.createdAt.toISOString(),
 });
 
-const isUniqueViolation = (err: unknown) => {
-  for (let e: unknown = err; e; e = (e as { cause?: unknown }).cause) {
-    if ((e as { code?: string }).code === "23505") return true;
-  }
-  return false;
-};
-
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
 export function appRoutes(deps: Deps) {
   const { db } = deps;
   const r = new Hono<AppEnv>();
 
   /** Every lookup is scoped to the active organization; other orgs' apps are simply "not found". */
   async function findApp(orgId: string, id: string) {
-    if (!UUID.test(id)) throw notFound("App");
+    if (!isUuid(id)) throw notFound("App");
     const [row] = await db
       .select()
       .from(apps)

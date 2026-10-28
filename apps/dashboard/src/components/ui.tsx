@@ -1,4 +1,5 @@
 import { brand } from "@hshelby/contracts";
+import Image from "next/image";
 import Link from "next/link";
 import type { ButtonHTMLAttributes, InputHTMLAttributes, ReactNode } from "react";
 
@@ -75,5 +76,26 @@ export function AuthCard({ title, subtitle, children, footer }: { title: string;
       </div>
       <p className="mt-6 text-[14px] text-secondary">{footer}</p>
     </main>
+  );
+}
+
+export function AppIcon({ app, size = 56 }: { app: { name: string; iconUrl: string | null }; size?: number }) {
+  return app.iconUrl ? (
+    <Image
+      src={app.iconUrl}
+      alt=""
+      width={size}
+      height={size}
+      unoptimized
+      style={{ width: size, height: size }}
+      className="shrink-0 rounded-[22%] outline outline-1 -outline-offset-1 outline-black/5"
+    />
+  ) : (
+    <span
+      style={{ width: size, height: size, fontSize: size * 0.4 }}
+      className="flex shrink-0 items-center justify-center rounded-[22%] bg-white text-secondary outline outline-1 -outline-offset-1 outline-black/5"
+    >
+      {app.name[0]}
+    </span>
   );
 }
