@@ -1,6 +1,7 @@
 import { createAppStoreClient, parseKeyring } from "@hshelby/core";
 import { createDb } from "@hshelby/db";
 import { createApnsClient } from "@hshelby/push";
+import { createStorage, storageConfigFromEnv } from "@hshelby/storage";
 import pino from "pino";
 import { createAuth } from "./auth";
 import type { Deps } from "./context";
@@ -8,7 +9,12 @@ import { deriveDeviceTokenKey } from "./device-tokens";
 import type { Env } from "./env";
 import { createJobs } from "./jobs";
 
-export function createDeps(env: Env, overrides: Partial<Pick<Deps, "appStore" | "logger" | "apns">> = {}) {
+function storageFromEnv(env: Env) {
+  const config = storageConfigFromEnv(env);
+  return config ? createStorage(config) : null;
+}
+
+export function createDeps(env: Env, overrides: Partial<Pick<Deps, "appStore" | "logger" | "apns" | "storage">> = {}) {
   const logger =
     overrides.logger ??
     pino({ level: env.NODE_ENV === "test" ? "silent" : env.LOG_LEVEL, base: { service: "api" } });
@@ -23,6 +29,7 @@ export function createDeps(env: Env, overrides: Partial<Pick<Deps, "appStore" | 
     deviceTokenKey: deriveDeviceTokenKey(env.BETTER_AUTH_SECRET),
     jobs: createJobs(env.DATABASE_URL, logger),
     apns: overrides.apns ?? createApnsClient(),
+    storage: overrides.storage !== undefined ? overrides.storage : storageFromEnv(env),
   };
   return { deps, pool };
 }

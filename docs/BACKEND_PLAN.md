@@ -27,7 +27,7 @@ Why one Postgres for everything at the start: messages, the job queue, realtime 
 
 ## Status
 
-**B0, B1, B3 and B4 run on Railway staging** (project `hshelby`, environment `staging`): dashboard at `https://dashboard-staging-0dee.up.railway.app`, API at `https://api-staging-f8f8.up.railway.app`.
+**B0–B4 run on Railway staging** (project `hshelby`, environment `staging`): dashboard at `https://dashboard-staging-0dee.up.railway.app`, API at `https://api-staging-f8f8.up.railway.app`.
 
 B1 (messaging core) as built:
 
@@ -37,7 +37,7 @@ B1 (messaging core) as built:
 - **Inbox API** (`apps/api/src/routes/inbox.ts`): conversations list (status/app filters, keyset cursor), detail, thread paging, reply, read, resolve/reopen, device block/unblock (audited). `conversations.organization_id` is denormalized from the app for the inbox index.
 - **Dashboard:** `/inbox` with a polled list and thread (optimistic replies, resolve, block, device details). Onboarding's "waiting for your first message" completes on the first real message.
 - **Try it without an app:** `npx tsx apps/api/scripts/sdk-sim.ts --app app_… --api <api url> --say "Hello" --chat` plays the SDK.
-- **Deferred to their phases:** photos (B2), realtime (B6; polling until then), rate limits on `POST /v1/devices` (B12).
+- **Deferred to their phases:** realtime (B6; polling until then), rate limits on `POST /v1/devices` (B12).
 
 B4 (identity and deletion) as built:
 
@@ -62,6 +62,19 @@ B3 (push) as built:
 - **Not verified here:** delivery to a real iPhone. That needs an Apple key and a device; everything up to Apple's servers is tested against the fake APNs.
 - **Deferred:** per-language templates, skipping pushes while the user is in the chat (needs B6 presence), offer-card pushes (B7).
 
+B2 (photos) as built:
+
+- **Package** `packages/storage`: a client for any S3-compatible bucket (a Railway Bucket on staging; R2 and S3 work the same way), with presigned PUT and GET, one-object-at-a-time deletes (the one delete every provider supports), prefix deletes, and a JPEG/PNG header reader that gets the type and pixel size without decoding. `@hshelby/storage/testing` makes a bucket on a local moto server.
+- **Upload:** `POST /v1/uploads {contentType, bytes, width, height, checksum}` (JPEG or PNG, ≤1 MiB, longest side ≤2048 px, base64 SHA-256) stores a pending row and returns a PUT URL valid for 15 minutes, signed with the type, length and checksum. The SDK PUTs the file, then sends `POST /v1/messages {clientId, text, attachmentIds}` (up to 4 photos; text is optional when there are photos). The SDK should re-encode before uploading, which applies EXIF orientation and drops metadata such as location.
+- **Verify on send** (`apps/api/src/photos.ts`): before the message is stored, the server reads each object back and checks its size, SHA-256, file signature and dimensions, so it doesn't depend on the provider enforcing the signature. A missing object is `upload_incomplete` (409: PUT again, resend); anything else is `invalid_attachment` (422). Photos are attached inside the message's transaction, and a retried `clientId` returns the stored message with its photos.
+- **Reading:** messages carry `attachments: [{id, url, contentType, width, height}]`; `url` is a signed GET that works for 15 minutes and is fresh on every fetch. A photo-only message previews as "Photo" in the inbox and "Sent a photo" in a push.
+- **Limits:** 20 unsent uploads per device (`too_many_uploads`, 429); blocked devices, and unverified ones in only-verified mode, can't upload. An upload has to be sent within 23 hours.
+- **Cleanup:** the worker's hourly `maintenance.unsent-uploads` job removes uploads still unsent after 24 hours, object first, then row. The hour between the send window and the sweep means a send never attaches a photo the sweep is deleting. Deleting a device (SDK or admin) deletes its photos first; purging an app deletes the app's.
+- **Teammates:** `POST /api/conversations/:id/attachments` (multipart `file`; the 1.1 MB body limit applies to that route only) checks and stores the photo, and the reply sends it with `attachmentIds`. The dashboard redraws each picked photo in the browser (EXIF orientation applied, metadata dropped, longest side 2048 px, PNG kept when it fits, otherwise JPEG at falling quality until ≤1 MB), uploads it as soon as it's picked, and shows photos in the thread with a full-size viewer.
+- **Without a bucket** (no `S3_*` variables) photos are off: uploads answer `uploads_not_configured` (503) and text messaging works as before.
+- **Simulator:** `--photo PATH` (repeatable) and `--caption` run the SDK's upload flow.
+- **Deferred:** thumbnails (the dashboard and SDK show the ≤2048 px original), photos in Telegram (B8).
+
 Where B0 differs from the plan below:
 
 - **Sign-in is email + password.** Google comes later; it is one `socialProviders.google` block in `apps/api/src/auth.ts` plus a button.
@@ -73,9 +86,10 @@ Railway layout:
 | Service | Build / start | Notes |
 |---|---|---|
 | `api` | `npm run build -w @hshelby/api` / `npm run start -w @hshelby/api` | Pre-deploy `npm run migrate -w @hshelby/api`; healthcheck `/health` (runs `select 1`). |
-| `worker` | same with `@hshelby/worker` | pg-boss; nightly cleanup at 03:00 UTC. |
+| `worker` | same with `@hshelby/worker` | pg-boss: `push.send`, nightly cleanup at 03:00 UTC, deleted-app purge every 15 minutes, unsent-upload sweep hourly. |
 | `dashboard` | same with `@hshelby/dashboard` | Healthcheck `/health`. Proxies `/api/*` to the API over the private network, so auth cookies are first-party. |
 | `Postgres` | Railway template | |
+| `photos` | Railway Bucket | Private; read and written only through presigned URLs and the API. |
 
 Service settings live on the services themselves (Railway's JSON config-as-code is deprecated). Watch patterns limit redeploys to the paths each service uses.
 
@@ -90,6 +104,7 @@ Variables (secrets are set in Railway only, never in the repo):
 | api | `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_PRICE_MONTHLY`, `STRIPE_PRICE_YEARLY` | Stripe sandbox values; webhook endpoint `https://<api domain>/api/auth/stripe/webhook` |
 | worker | `DATABASE_URL` | `${{Postgres.DATABASE_URL}}` |
 | worker | `ENC_KEYS` | `${{api.ENC_KEYS}}` (decrypts apps' APNs keys) |
+| api, worker | `S3_ENDPOINT`, `S3_REGION`, `S3_BUCKET`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY` | `${{photos.ENDPOINT}}`, `${{photos.REGION}}`, `${{photos.BUCKET}}`, `${{photos.ACCESS_KEY_ID}}`, `${{photos.SECRET_ACCESS_KEY}}` (photos are off without them) |
 | dashboard | `API_INTERNAL_URL` | `http://${{api.RAILWAY_PRIVATE_DOMAIN}}:${{api.PORT}}`, read at build time |
 
 ---
@@ -383,7 +398,7 @@ Each phase ends with acceptance tests that must pass in CI and on staging.
 |---|---|---|---|
 | **B0 Foundations** (done, see Status) | Monorepo, move landing page to `apps/web`, Postgres + Drizzle migrations, Hono skeleton with error envelope, `contracts` → OpenAPI, Better Auth (Google), orgs/members/invitations/apps CRUD, encryption util, pino logs + Sentry, Railway staging deploy with migrate-on-deploy, CI | A teammate signs in with Google, creates an org and an app, and sees its `app_…` ID on staging | 1 wk |
 | **B1 Messaging core** (done, see Status) | Device register/refresh, conversation sync, send with seq + idempotency, read/unread, inbox list/thread/reply/resolve/block | A script acting as the SDK sends 200 concurrent messages with 20% retried `clientId`s → exactly 200 rows, seq 1–200 with no gaps; a dashboard reply shows up on the next poll | 2 wks |
-| **B2 Photos** | Presign, verify, signed GET, nightly cleanup | A wrong checksum is rejected; a pending upload disappears after 24h in a time-travel test | 0.5–1 wk |
+| **B2 Photos** (done, see Status) | Presign, verify, signed GET, hourly cleanup | A wrong checksum is rejected; a pending upload disappears after 24h in a time-travel test | 0.5–1 wk |
 | **B3 Push** (built; real-device check pending, see Status) | `.p8` upload, `push.send`, env per device, templates, badge, issue capture, "send test" | Real device gets a push in sandbox and production builds; a revoked token clears itself | 1 wk |
 | **B4 Identity & deletion** (done, see Status) | `identify` labels, metadata limits, JWT verification, only-verified mode, logout/delete + `purge.scope` | JWT test vectors from the docs pass; a deleted device's rows and objects are gone | 1 wk |
 | **B5 Billing** | Stripe Checkout/Portal/webhooks, gating middleware, founder-spot counter | Test-mode subscription toggles reply access; users can still send while lapsed | 0.5–1 wk |

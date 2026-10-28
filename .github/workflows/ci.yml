@@ -28,6 +28,7 @@ jobs:
           --health-retries 10
     env:
       TEST_DATABASE_URL: postgres://postgres@localhost:5433/hshelby_test
+      TEST_S3_ENDPOINT: http://127.0.0.1:5070
       NEXT_TELEMETRY_DISABLED: "1"
     steps:
       - uses: actions/checkout@v4
@@ -35,6 +36,14 @@ jobs:
         with:
           node-version: 22
           cache: npm
+      # S3-compatible server for photo tests
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install "moto[server]"
+      - run: |
+          moto_server -H 127.0.0.1 -p 5070 > /tmp/moto.log 2>&1 &
+          for i in $(seq 1 30); do curl -sf http://127.0.0.1:5070/ > /dev/null && break; sleep 1; done
       - run: npm ci
       - run: npm run typecheck
       - run: npm run lint

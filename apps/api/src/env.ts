@@ -23,6 +23,13 @@ const EnvSchema = z.object({
   DOCS_URL: optional,
   SWIFT_PACKAGE_URL: optional,
   RN_PACKAGE: optional,
+  // S3-compatible bucket for photos. Photos are off unless endpoint, bucket and both keys are set.
+  S3_ENDPOINT: optional,
+  S3_REGION: optional,
+  S3_BUCKET: optional,
+  S3_ACCESS_KEY_ID: optional,
+  S3_SECRET_ACCESS_KEY: optional,
+  S3_FORCE_PATH_STYLE: optional,
   // Stripe (test mode). Billing is off unless all four are set.
   STRIPE_SECRET_KEY: optional,
   STRIPE_WEBHOOK_SECRET: optional,

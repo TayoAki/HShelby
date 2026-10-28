@@ -1,18 +1,27 @@
 "use client";
 
-import { MESSAGE_MAX_LENGTH, type InboxConversation, type InboxMessage, type InboxThread } from "@hshelby/contracts";
-import { ArrowLeftIcon, ArrowUpIcon } from "@radix-ui/react-icons";
+import {
+  MESSAGE_MAX_LENGTH,
+  PHOTO_LIMITS,
+  type Attachment,
+  type InboxConversation,
+  type InboxMessage,
+  type InboxThread,
+} from "@hshelby/contracts";
+import { ArrowLeftIcon, ArrowUpIcon, ImageIcon } from "@radix-ui/react-icons";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { AppIcon, ErrorNote, Spinner } from "@/components/ui";
-import { api, ApiError } from "@/lib/api";
+import { api, ApiError, apiForm } from "@/lib/api";
 import { authClient } from "@/lib/auth-client";
+import { preparePhoto } from "@/lib/photos";
 import { clockTime, dayLabel, localTimeIn, relativeTime, sameDay } from "@/lib/time";
 import { isAdmin, useMe } from "@/lib/use-me";
 import { useVisibleInterval } from "@/lib/use-visible-interval";
 import { IdentityBadge } from "./Identity";
 import { deviceLabel, useInbox } from "./InboxContext";
+import { MessagePhotos, PhotoViewer, StagedPhotos, type StagedPhoto } from "./Photos";
 
 /** A stored message, or one of ours still on its way (no seq yet). */
 type Item = InboxMessage & { state?: "sending" | "failed" };
@@ -69,7 +78,10 @@ export function Thread({ conversationId }: { conversationId: string }) {
   const [hasOlder, setHasOlder] = useState(false);
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [draft, setDraft] = useState("");
+  const [staged, setStaged] = useState<StagedPhoto[]>([]);
+  const [viewing, setViewing] = useState<Attachment | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const fileInput = useRef<HTMLInputElement>(null);
   const [missing, setMissing] = useState(false);
   const scroller = useRef<HTMLDivElement>(null);
   const stickToBottom = useRef(true);
@@ -126,7 +138,7 @@ export function Thread({ conversationId }: { conversationId: string }) {
     }
   }, [items]);
 
-  async function send(text: string, clientId: string = crypto.randomUUID()) {
+  async function send(text: string, photos: Attachment[], clientId: string = crypto.randomUUID()) {
     const pending: Item = {
       id: `pending-${clientId}`,
       seq: Number.MAX_SAFE_INTEGER,
@@ -134,6 +146,7 @@ export function Thread({ conversationId }: { conversationId: string }) {
       source: "dashboard",
       text,
       clientId,
+      attachments: photos,
       createdAt: new Date().toISOString(),
       author: session ? { id: session.user.id, name: session.user.name } : null,
       state: "sending",
@@ -144,7 +157,7 @@ export function Thread({ conversationId }: { conversationId: string }) {
       // Resending with the same clientId can't create a second copy.
       const { message } = await api<{ message: InboxMessage }>(`${base}/messages`, {
         method: "POST",
-        body: JSON.stringify({ clientId, text }),
+        body: JSON.stringify({ clientId, text, attachmentIds: photos.map((a) => a.id) }),
       });
       setItems((current) => merge(current, [message]));
       setConversation((c) => c && { ...c, lastSeq: Math.max(c.lastSeq, message.seq), unreadForTeam: 0 });
@@ -154,12 +167,49 @@ export function Thread({ conversationId }: { conversationId: string }) {
     }
   }
 
+  const ready = staged.flatMap((p) => (p.attachment ? [p.attachment] : []));
+  const uploading = staged.some((p) => !p.attachment && !p.error);
+
   function submit(e?: FormEvent) {
     e?.preventDefault();
     const text = draft.trim();
-    if (!text) return;
+    if ((!text && ready.length === 0) || uploading) return;
     setDraft("");
-    void send(text);
+    for (const p of staged) URL.revokeObjectURL(p.previewUrl);
+    setStaged([]);
+    void send(text, ready);
+  }
+
+  /** Photos upload as soon as they're picked, so sending is instant. */
+  function pickPhotos(files: FileList | null) {
+    const picked = Array.from(files ?? []).slice(0, PHOTO_LIMITS.perMessage - staged.length);
+    for (const file of picked) {
+      const localId = crypto.randomUUID();
+      setStaged((current) => [...current, { localId, previewUrl: URL.createObjectURL(file) }]);
+      const update = (patch: Partial<StagedPhoto>) =>
+        setStaged((current) => current.map((p) => (p.localId === localId ? { ...p, ...patch } : p)));
+      preparePhoto(file)
+        .then((photo) => {
+          const form = new FormData();
+          form.set("file", photo);
+          return apiForm<{ attachment: Attachment }>(`${base}/attachments`, form);
+        })
+        .then(({ attachment }) => update({ attachment }))
+        .catch((e: unknown) => {
+          const message = e instanceof Error ? e.message : "Couldn't upload this photo";
+          update({ error: message });
+          setError(message);
+        });
+    }
+    if (fileInput.current) fileInput.current.value = "";
+  }
+
+  function unstage(localId: string) {
+    setStaged((current) => {
+      const photo = current.find((p) => p.localId === localId);
+      if (photo) URL.revokeObjectURL(photo.previewUrl);
+      return current.filter((p) => p.localId !== localId);
+    });
   }
 
   async function loadOlder() {
@@ -282,21 +332,28 @@ export function Thread({ conversationId }: { conversationId: string }) {
                 {(!previous || !sameDay(previous.createdAt, m.createdAt)) && (
                   <p className="my-4 text-center text-[12px] text-secondary">{dayLabel(m.createdAt)}</p>
                 )}
-                <div className={`mt-1 flex ${agent ? "justify-end" : "justify-start"}`}>
-                  <p
-                    className={`max-w-[75%] whitespace-pre-wrap break-words rounded-[20px] px-4 py-2.5 text-[15px] leading-[1.4] ${
-                      agent ? "bg-[var(--accent)] text-white" : "bg-panel"
-                    } ${m.state === "sending" ? "opacity-60" : ""} ${m.state === "failed" ? "opacity-60 ring-2 ring-[#b42318]" : ""}`}
-                  >
-                    {m.text}
-                  </p>
-                </div>
+                {m.attachments.length > 0 && (
+                  <div className={`mt-1 flex ${agent ? "justify-end" : "justify-start"} ${m.state ? "opacity-60" : ""}`}>
+                    <MessagePhotos attachments={m.attachments} align={agent ? "end" : "start"} onOpen={setViewing} />
+                  </div>
+                )}
+                {m.text && (
+                  <div className={`mt-1 flex ${agent ? "justify-end" : "justify-start"}`}>
+                    <p
+                      className={`max-w-[75%] whitespace-pre-wrap break-words rounded-[20px] px-4 py-2.5 text-[15px] leading-[1.4] ${
+                        agent ? "bg-[var(--accent)] text-white" : "bg-panel"
+                      } ${m.state === "sending" ? "opacity-60" : ""} ${m.state === "failed" ? "opacity-60 ring-2 ring-[#b42318]" : ""}`}
+                    >
+                      {m.text}
+                    </p>
+                  </div>
+                )}
                 {last && (
                   <p className={`mt-1 mb-3 text-[11px] text-secondary ${agent ? "text-right" : ""}`}>
                     {m.state === "failed" ? (
                       <>
                         Not sent ·{" "}
-                        <button type="button" onClick={() => send(m.text, m.clientId!)} className="text-fg underline underline-offset-2">
+                        <button type="button" onClick={() => send(m.text, m.attachments, m.clientId!)} className="text-fg underline underline-offset-2">
                           Retry
                         </button>
                       </>
@@ -334,7 +391,25 @@ export function Thread({ conversationId }: { conversationId: string }) {
           </p>
         )}
         <form onSubmit={submit} className="px-5 pb-4">
-          <div className="flex items-end gap-2 rounded-[24px] border border-[var(--field)] bg-white p-1.5 pl-4 transition-colors focus-within:border-fg/60">
+          <StagedPhotos photos={staged} onRemove={unstage} />
+          <div className="flex items-end gap-2 rounded-[24px] border border-[var(--field)] bg-white p-1.5 transition-colors focus-within:border-fg/60">
+            <input
+              ref={fileInput}
+              type="file"
+              accept="image/*"
+              multiple
+              hidden
+              onChange={(e) => pickPhotos(e.target.files)}
+            />
+            <button
+              type="button"
+              onClick={() => fileInput.current?.click()}
+              disabled={staged.length >= PHOTO_LIMITS.perMessage}
+              aria-label="Attach photos"
+              className="flex size-9 shrink-0 items-center justify-center rounded-full text-secondary transition-colors hover:bg-panel hover:text-fg disabled:opacity-40"
+            >
+              <ImageIcon width={18} height={18} />
+            </button>
             <textarea
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
@@ -349,7 +424,7 @@ export function Thread({ conversationId }: { conversationId: string }) {
             />
             <button
               type="submit"
-              disabled={!draft.trim()}
+              disabled={(!draft.trim() && ready.length === 0) || uploading}
               aria-label="Send"
               className="flex size-9 shrink-0 items-center justify-center rounded-full bg-[var(--accent)] text-white transition-colors hover:bg-[var(--accent-hover)] disabled:bg-[var(--accent-disabled)]"
             >
@@ -360,6 +435,7 @@ export function Thread({ conversationId }: { conversationId: string }) {
         </form>
       </section>
 
+      {viewing && <PhotoViewer attachment={viewing} onClose={() => setViewing(null)} />}
       <aside className="hidden w-[280px] shrink-0 overflow-y-auto border-l border-line px-5 py-4 xl:block">
         <DetailsSection title="User">
           <Detail label="Name" value={device.name} />

@@ -97,7 +97,7 @@ export async function deliverMessagePush(
     payload: buildPushPayload(row.config, {
       appName: row.appName,
       authorName: row.authorName,
-      message: row.message.text,
+      message: row.message.text || "Sent a photo",
       conversationId: row.conversation.id,
       messageId: row.message.id,
       // read at send time, so it includes this reply and anything the user has read since

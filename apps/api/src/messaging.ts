@@ -3,6 +3,7 @@ import { uuidv7 } from "@hshelby/core";
 import { apps, conversations, messages, users, type Db, type Tx } from "@hshelby/db";
 import { and, asc, count, desc, eq, gt, isNull, lt, sql } from "drizzle-orm";
 import { ApiError, isUniqueViolation, notFound } from "./errors";
+import { linkAttachments } from "./photos";
 
 /*
  * Every message goes through one short transaction:
@@ -20,13 +21,18 @@ export type Appended = { message: MessageRow; conversation: ConversationRow; cre
 
 const live = (deviceId: string) => and(eq(conversations.deviceId, deviceId), isNull(conversations.supersededAt));
 
-/** Appends a message from the device's user, creating its conversation on the first one. Reopens a closed conversation. */
+/**
+ * Appends a message from the device's user, creating its conversation on the first one. Reopens a closed
+ * conversation. `verifyAttachments` runs after the replay check, so a resend doesn't re-check sent photos.
+ */
 export async function appendUserMessage(
   db: Db,
-  input: { organizationId: string; appId: string; deviceId: string; clientId: string; text: string },
+  input: { organizationId: string; appId: string; deviceId: string; clientId: string; text: string; attachmentIds: string[] },
+  verifyAttachments: () => Promise<void> = async () => {},
 ): Promise<Appended> {
   const replay = await findUserReplay(db, input.deviceId, input.clientId);
   if (replay) return replay;
+  await verifyAttachments();
 
   try {
     return await db.transaction(async (tx) => {
@@ -70,6 +76,7 @@ export async function appendUserMessage(
           text: input.text,
         })
         .returning();
+      await linkAttachments(tx, { messageId: message!.id, deviceId: input.deviceId, uploadedBy: "user", ids: input.attachmentIds });
 
       // Completes the dashboard's "waiting for your first message" step.
       await tx
@@ -92,7 +99,14 @@ export async function appendUserMessage(
 export async function appendAgentMessage(
   db: Db,
   jobs: { pushMessage(tx: Tx, messageId: string): Promise<void> },
-  input: { organizationId: string; conversationId: string; authorUserId: string; clientId: string; text: string },
+  input: {
+    organizationId: string;
+    conversationId: string;
+    authorUserId: string;
+    clientId: string;
+    text: string;
+    attachmentIds: string[];
+  },
 ): Promise<Appended> {
   const replay = await findAgentReplay(db, input);
   if (replay) return replay;
@@ -133,6 +147,12 @@ export async function appendAgentMessage(
           text: input.text,
         })
         .returning();
+      await linkAttachments(tx, {
+        messageId: message!.id,
+        deviceId: conversation.deviceId,
+        uploadedBy: "agent",
+        ids: input.attachmentIds,
+      });
       await jobs.pushMessage(tx, message!.id);
       return { message: message!, conversation, created: true };
     });

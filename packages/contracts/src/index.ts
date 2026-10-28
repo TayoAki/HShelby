@@ -26,6 +26,10 @@ export const errorCodes = [
   "delete_failed",
   "push_not_configured",
   "invalid_push_key",
+  "uploads_not_configured",
+  "upload_incomplete",
+  "invalid_attachment",
+  "too_many_uploads",
   "internal_error",
 ] as const;
 export type ErrorCode = (typeof errorCodes)[number];
@@ -115,4 +119,5 @@ export type BillingConfig = z.infer<typeof BillingConfig>;
 
 export * from "./identity";
 export * from "./messaging";
+export * from "./photos";
 export * from "./push";

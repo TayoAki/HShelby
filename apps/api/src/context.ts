@@ -1,6 +1,7 @@
 import type { AppStoreClient, Keyring } from "@hshelby/core";
 import type { Db, devices } from "@hshelby/db";
 import type { ApnsClient } from "@hshelby/push";
+import type { Storage } from "@hshelby/storage";
 import type { Logger } from "pino";
 import type { Auth } from "./auth";
 import type { Env } from "./env";
@@ -18,6 +19,8 @@ export type Deps = {
   jobs: Jobs;
   /** For "Send test"; regular pushes go out from the worker. */
   apns: ApnsClient;
+  /** Photo storage; null when no bucket is configured. */
+  storage: Storage | null;
 };
 
 type SessionResult = NonNullable<Awaited<ReturnType<Auth["api"]["getSession"]>>>;

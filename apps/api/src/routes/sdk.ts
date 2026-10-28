@@ -6,14 +6,18 @@ import {
   RefreshInput,
   RegisterDeviceInput,
   SendMessageInput,
+  UploadRequest,
+  PHOTO_LIMITS,
+  type Attachment,
   type DeviceDetails,
   type PushRegistration,
   type SdkConversation,
   type SdkMessage,
+  type UploadTicket,
 } from "@hshelby/contracts";
 import { decryptSecret, newDeviceSecret, uuidv7 } from "@hshelby/core";
-import { apps, conversations, devices, type Db, type Tx } from "@hshelby/db";
-import { and, eq, isNull, ne, sql } from "drizzle-orm";
+import { apps, attachments, conversations, devices, type Db, type Tx } from "@hshelby/db";
+import { and, count, eq, gt, isNull, ne, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import type { Deps, SdkEnv } from "../context";
 import { hashDeviceSecret, signAccessToken } from "../device-tokens";
@@ -21,6 +25,15 @@ import { ApiError } from "../errors";
 import { nextIdentity, nextMetadata, sendingState, toSdkIdentity, verifyIdentityToken } from "../identity";
 import { appendUserMessage, markUserRead, pageMessages, type ConversationRow, type MessageRow } from "../messaging";
 import { requireDevice } from "../middleware";
+import {
+  attachmentsByMessage,
+  devicePrefix,
+  objectKey,
+  requireStorage,
+  sendableSince,
+  UPLOAD_URL_SECONDS,
+  verifyUploads,
+} from "../photos";
 import { parseJson, parseQuery } from "../validation";
 
 const toSdkConversation = (c: ConversationRow): SdkConversation => ({
@@ -31,15 +44,23 @@ const toSdkConversation = (c: ConversationRow): SdkConversation => ({
   unread: c.unreadForUser,
 });
 
-const toSdkMessage = (m: MessageRow): SdkMessage => ({
+const toSdkMessage = (m: MessageRow, attachmentsOf: Map<string, Attachment[]>): SdkMessage => ({
   id: m.id,
   seq: m.seq,
   sender: m.sender,
   text: m.text,
   // only the device's own client IDs; a teammate's are none of its business
   clientId: m.sender === "user" ? m.clientId : null,
+  attachments: attachmentsOf.get(m.id) ?? [],
   createdAt: m.createdAt.toISOString(),
 });
+
+/** Sending and uploading are refused the same way: blocked devices, and unverified ones where only verified users may chat. */
+function assertCanSend(device: Parameters<typeof sendingState>[0], onlyVerified: boolean) {
+  const sending = sendingState(device, onlyVerified);
+  if (sending.reason === "device_blocked") throw new ApiError(403, "device_blocked", "This device can't send messages");
+  if (sending.reason === "verification_required") throw new ApiError(403, "verification_required", "Sign in to send messages");
+}
 
 /** Empty strings from the SDK mean "unknown". */
 const cleanDetails = (details: DeviceDetails = {}) =>
@@ -181,8 +202,11 @@ export function sdkRoutes(deps: Deps) {
 
   /** deleteData(): this device, its identity, metadata, conversations and messages, gone for good. */
   r.delete("/device", auth, async (c) => {
+    const device = c.get("device");
     try {
-      await db.delete(devices).where(eq(devices.id, c.get("device").id));
+      // photos first: if that fails, the device is still there and the SDK retries
+      await deps.storage?.deletePrefix(devicePrefix(device.appId, device.id));
+      await db.delete(devices).where(eq(devices.id, device.id));
     } catch (err) {
       deps.logger.error({ err, requestId: c.get("requestId") }, "device delete failed");
       throw new ApiError(503, "delete_failed", "Couldn't delete this device's data; try again");
@@ -202,12 +226,63 @@ export function sdkRoutes(deps: Deps) {
       .limit(1);
     if (!conversation) return c.json({ ...state, conversation: null, messages: [], hasMore: false });
     const page = await pageMessages(db, conversation.id, query);
+    const attachmentsOf = await attachmentsByMessage(db, deps.storage, page.messages.map((m) => m.id));
     return c.json({
       ...state,
       conversation: toSdkConversation(conversation),
-      messages: page.messages.map(toSdkMessage),
+      messages: page.messages.map((m) => toSdkMessage(m, attachmentsOf)),
       hasMore: page.hasMore,
     });
+  });
+
+  /**
+   * An upload ticket for one photo: a presigned PUT for the declared type, size and SHA-256. The photo is
+   * checked against those when a message is sent with it; unsent uploads are removed after a day.
+   */
+  r.post("/uploads", auth, async (c) => {
+    const storage = requireStorage(deps.storage);
+    const input = await parseJson(c, UploadRequest);
+    const device = c.get("device");
+    const app = c.get("app");
+    assertCanSend(device, app.onlyVerified);
+    const [unsent] = await db
+      .select({ n: count() })
+      .from(attachments)
+      .where(
+        and(
+          eq(attachments.deviceId, device.id),
+          eq(attachments.uploadedBy, "user"),
+          isNull(attachments.messageId),
+          gt(attachments.createdAt, sendableSince()),
+        ),
+      );
+    if (unsent!.n >= PHOTO_LIMITS.unsentPerDevice) {
+      throw new ApiError(429, "too_many_uploads", "Send or discard earlier photos first");
+    }
+
+    const attachmentId = uuidv7();
+    const key = objectKey(app.id, device.id, attachmentId, input.contentType);
+    await db.insert(attachments).values({
+      id: attachmentId,
+      appId: app.id,
+      deviceId: device.id,
+      uploadedBy: "user",
+      objectKey: key,
+      contentType: input.contentType,
+      bytes: input.bytes,
+      width: input.width,
+      height: input.height,
+      sha256: input.checksum,
+    });
+    const { url, headers } = await storage.presignUpload({
+      key,
+      contentType: input.contentType,
+      bytes: input.bytes,
+      sha256: input.checksum,
+      expiresIn: UPLOAD_URL_SECONDS,
+    });
+    const ticket: UploadTicket = { attachmentId, uploadUrl: url, method: "PUT", headers, expiresIn: UPLOAD_URL_SECONDS };
+    return c.json(ticket, 201);
   });
 
   /** 201 for a new message, 200 with the stored one when the clientId was already sent. */
@@ -215,20 +290,25 @@ export function sdkRoutes(deps: Deps) {
     const input = await parseJson(c, SendMessageInput);
     const device = c.get("device");
     const app = c.get("app");
-    const sending = sendingState(device, app.onlyVerified);
-    if (sending.reason === "device_blocked") throw new ApiError(403, "device_blocked", "This device can't send messages");
-    if (sending.reason === "verification_required") {
-      throw new ApiError(403, "verification_required", "Sign in to send messages");
-    }
-    const result = await appendUserMessage(db, {
-      organizationId: app.organizationId,
-      appId: app.id,
-      deviceId: device.id,
-      clientId: input.clientId,
-      text: input.text,
-    });
+    assertCanSend(device, app.onlyVerified);
+    const result = await appendUserMessage(
+      db,
+      {
+        organizationId: app.organizationId,
+        appId: app.id,
+        deviceId: device.id,
+        clientId: input.clientId,
+        text: input.text,
+        attachmentIds: input.attachmentIds,
+      },
+      async () => {
+        // text-only messages work without a bucket
+        if (input.attachmentIds.length > 0) await verifyUploads(db, requireStorage(deps.storage), device.id, input.attachmentIds);
+      },
+    );
+    const attachmentsOf = await attachmentsByMessage(db, deps.storage, [result.message.id]);
     return c.json(
-      { message: toSdkMessage(result.message), conversation: toSdkConversation(result.conversation) },
+      { message: toSdkMessage(result.message, attachmentsOf), conversation: toSdkConversation(result.conversation) },
       result.created ? 201 : 200,
     );
   });

@@ -12,7 +12,7 @@ const fx = await pushFixture();
 const schema = "pgboss_worker_test";
 await fx.db.execute(sql.raw(`drop schema if exists ${schema} cascade`));
 const boss = new PgBoss({ connectionString, schema, useListenNotify: true });
-await startWorker({ db: fx.db, boss, apns: fx.apns, keyring: fx.keyring, logger: pino({ level: "silent" }) });
+await startWorker({ db: fx.db, boss, apns: fx.apns, keyring: fx.keyring, storage: null, logger: pino({ level: "silent" }) });
 afterAll(async () => {
   await boss.stop({ graceful: false });
   await fx.close();

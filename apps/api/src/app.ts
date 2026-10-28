@@ -43,7 +43,10 @@ export function createApp(deps: Deps) {
 
   // Dashboard API: Better Auth session cookie, scoped to the active organization.
   const api = new Hono<AppEnv>();
-  api.use("*", limitBody(64));
+  // JSON bodies stay small; a teammate's photo upload may be up to 1 MB plus multipart overhead
+  const smallBody = limitBody(64);
+  const photoBody = limitBody(1100);
+  api.use("*", (c, next) => (/^\/api\/conversations\/[^/]+\/attachments$/.test(c.req.path) ? photoBody : smallBody)(c, next));
   api.use("*", requireSession(deps), requireOrg(deps));
   api.route("/", accountRoutes(deps));
   api.route("/apps", appRoutes(deps));

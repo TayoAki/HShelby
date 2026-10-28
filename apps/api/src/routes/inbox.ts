@@ -3,18 +3,28 @@ import {
   MessagePageQuery,
   ReadInput,
   SendMessageInput,
+  type Attachment,
   type InboxConversation,
   type InboxDevice,
   type InboxMessage,
 } from "@hshelby/contracts";
 import { uuidv7 } from "@hshelby/core";
-import { apps, auditEvents, conversations, devices, messages } from "@hshelby/db";
+import { apps, attachments, auditEvents, conversations, devices, messages } from "@hshelby/db";
 import { and, desc, eq, ilike, inArray, isNull, or, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import type { AppEnv, Deps } from "../context";
 import { ApiError, notFound } from "../errors";
 import { appendAgentMessage, markTeamRead, pageMessages, type ConversationRow, type PagedMessage } from "../messaging";
 import { requireOrgAdmin } from "../middleware";
+import {
+  attachmentsByMessage,
+  checkImage,
+  devicePrefix,
+  objectKey,
+  requireStorage,
+  sha256Base64,
+  toAttachment,
+} from "../photos";
 import { isUuid, parseJson, parseQuery } from "../validation";
 
 type DeviceRow = typeof devices.$inferSelect;
@@ -48,13 +58,14 @@ const toInboxDevice = (d: DeviceRow): InboxDevice => ({
 /** ILIKE pattern for a literal substring. */
 const contains = (q: string) => `%${q.replace(/[\\%_]/g, "\\$&")}%`;
 
-const toInboxMessage = (m: PagedMessage): InboxMessage => ({
+const toInboxMessage = (m: PagedMessage, attachmentsOf: Map<string, Attachment[]>): InboxMessage => ({
   id: m.id,
   seq: m.seq,
   sender: m.sender,
   source: m.source,
   text: m.text,
   clientId: m.sender === "agent" ? m.clientId : null,
+  attachments: attachmentsOf.get(m.id) ?? [],
   createdAt: m.createdAt.toISOString(),
   author: m.authorUserId && m.authorName ? { id: m.authorUserId, name: m.authorName } : null,
 });
@@ -99,7 +110,8 @@ export function conversationRoutes(deps: Deps) {
     lastSeq: row.conversation.lastSeq,
     unreadForTeam: row.conversation.unreadForTeam,
     lastMessageAt: row.conversation.lastMessageAt.toISOString(),
-    lastMessage: row.lastSender && row.lastText !== null ? { sender: row.lastSender, text: row.lastText } : null,
+    // a photo-only message has no text to preview
+    lastMessage: row.lastSender && row.lastText !== null ? { sender: row.lastSender, text: row.lastText || "Photo" } : null,
   });
 
   async function findConversation(orgId: string, id: string) {
@@ -151,7 +163,45 @@ export function conversationRoutes(deps: Deps) {
     const query = parseQuery(c, MessagePageQuery);
     const row = await findConversation(c.get("org").id, c.req.param("id"));
     const page = await pageMessages(db, row.conversation.id, query);
-    return c.json({ messages: page.messages.map(toInboxMessage), hasMore: page.hasMore });
+    const attachmentsOf = await attachmentsByMessage(db, deps.storage, page.messages.map((m) => m.id));
+    return c.json({ messages: page.messages.map((m) => toInboxMessage(m, attachmentsOf)), hasMore: page.hasMore });
+  });
+
+  /**
+   * A teammate's photo for a reply (multipart field `file`). Checked and stored right away; it's sent by
+   * replying with its ID, and removed after a day if it never is.
+   */
+  r.post("/:id/attachments", async (c) => {
+    const storage = requireStorage(deps.storage);
+    const { conversation } = await findConversation(c.get("org").id, c.req.param("id"));
+    const form = await c.req.parseBody();
+    const file = form.file;
+    if (!(file instanceof File)) throw new ApiError(400, "validation_failed", "file: attach a photo");
+    const body = Buffer.from(await file.arrayBuffer());
+    const info = checkImage(body);
+
+    const attachmentId = uuidv7();
+    const key = objectKey(conversation.appId, conversation.deviceId, attachmentId, info.contentType);
+    await storage.put(key, body, info.contentType);
+    const [row] = await db
+      .insert(attachments)
+      .values({
+        id: attachmentId,
+        appId: conversation.appId,
+        deviceId: conversation.deviceId,
+        uploadedBy: "agent",
+        authorUserId: c.get("user").id,
+        objectKey: key,
+        contentType: info.contentType,
+        bytes: body.length,
+        width: info.width,
+        height: info.height,
+        sha256: sha256Base64(body),
+        status: "verified",
+        verifiedAt: new Date(),
+      })
+      .returning();
+    return c.json({ attachment: await toAttachment(storage, row!) }, 201);
   });
 
   /** A teammate's reply. 201 for a new message, 200 with the stored one when the clientId was already sent. */
@@ -166,8 +216,13 @@ export function conversationRoutes(deps: Deps) {
       authorUserId: user.id,
       clientId: input.clientId,
       text: input.text,
+      attachmentIds: input.attachmentIds,
     });
-    return c.json({ message: toInboxMessage({ ...result.message, authorName: user.name }) }, result.created ? 201 : 200);
+    const attachmentsOf = await attachmentsByMessage(db, deps.storage, [result.message.id]);
+    return c.json(
+      { message: toInboxMessage({ ...result.message, authorName: user.name }, attachmentsOf) },
+      result.created ? 201 : 200,
+    );
   });
 
   r.post("/:id/read", async (c) => {
@@ -246,10 +301,21 @@ export function deviceRoutes(deps: Deps) {
     const org = c.get("org");
     const id = c.req.param("id");
     if (!isUuid(id)) throw notFound("Device");
+    const [device] = await db
+      .select({ id: devices.id, appId: devices.appId })
+      .from(devices)
+      .where(and(eq(devices.id, id), inArray(devices.appId, orgApps(org.id))));
+    if (!device) throw notFound("Device");
+    try {
+      await deps.storage?.deletePrefix(devicePrefix(device.appId, device.id));
+    } catch (err) {
+      deps.logger.error({ err, requestId: c.get("requestId") }, "photo delete failed");
+      throw new ApiError(503, "delete_failed", "Couldn't delete this user's photos; try again");
+    }
     const deleted = await db.transaction(async (tx) => {
       const [row] = await tx
         .delete(devices)
-        .where(and(eq(devices.id, id), inArray(devices.appId, orgApps(org.id))))
+        .where(eq(devices.id, device.id))
         .returning({ id: devices.id, appId: devices.appId });
       if (row) {
         await tx.insert(auditEvents).values({

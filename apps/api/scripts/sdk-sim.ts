@@ -9,6 +9,7 @@
  * --verified        also send an identity token for those values, signed with $IDENTITY_SECRET the way the
  *                   developer's server would (env var, so the secret stays out of shell history)
  * --meta KEY=VALUE  setMetadata() (repeatable; replaces the whole set)
+ * --photo PATH      send a JPEG or PNG through the upload flow (repeatable, up to 4; --caption adds text)
  * --push-token HEX  report an APNs device token (with --push-env sandbox|production, default sandbox),
  *                   so "Send test" and replies target this device
  * --logout          logout(): end this device; the next run registers a new one
@@ -17,7 +18,7 @@
  *
  * The device secret is kept in .sdk-sim/<app>.json, so later runs continue the same conversation.
  */
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createInterface } from "node:readline";
 import { parseArgs } from "node:util";
@@ -29,7 +30,9 @@ import type {
   SdkMessage,
   SdkSendResult,
   SdkSync,
+  UploadTicket,
 } from "@hshelby/contracts";
+import { inspectImage } from "@hshelby/storage";
 import { SignJWT } from "jose";
 
 const { values: args } = parseArgs({
@@ -45,6 +48,8 @@ const { values: args } = parseArgs({
     email: { type: "string" },
     verified: { type: "boolean", default: false },
     meta: { type: "string", multiple: true },
+    photo: { type: "string", multiple: true, default: [] },
+    caption: { type: "string", default: "" },
     "push-token": { type: "string" },
     "push-env": { type: "string", default: "sandbox" },
     logout: { type: "boolean", default: false },
@@ -139,7 +144,39 @@ async function refresh() {
   }
 }
 
-const print = (m: SdkMessage) => console.log(`${m.sender === "user" ? "  you" : " team"} │ ${m.text}`);
+const print = (m: SdkMessage) => {
+  const photos = m.attachments.map((a) => `[photo ${a.width}×${a.height}]`).join(" ");
+  console.log(`${m.sender === "user" ? "  you" : " team"} │ ${[photos, m.text].filter(Boolean).join(" ")}`);
+};
+
+/** The SDK's photo flow: an upload ticket for the exact bytes, a PUT straight to storage, then the message. */
+async function sendPhotos(paths: string[], caption: string) {
+  const attachmentIds: string[] = [];
+  for (const path of paths) {
+    const body = readFileSync(path);
+    const info = inspectImage(body);
+    if (!info) throw new Error(`${path} isn't a JPEG or PNG`);
+    const ticket = await request<UploadTicket>("/v1/uploads", {
+      method: "POST",
+      body: JSON.stringify({
+        contentType: info.contentType,
+        bytes: body.length,
+        width: info.width,
+        height: info.height,
+        checksum: createHash("sha256").update(body).digest("base64"),
+      }),
+    });
+    const put = await fetch(ticket.uploadUrl, { method: ticket.method, headers: ticket.headers, body });
+    if (!put.ok) throw new Error(`upload of ${path} failed: ${put.status} ${await put.text()}`);
+    attachmentIds.push(ticket.attachmentId);
+  }
+  const { message } = await request<SdkSendResult>("/v1/messages", {
+    method: "POST",
+    body: JSON.stringify({ clientId: randomUUID(), text: caption, attachmentIds }),
+  });
+  lastSeq = Math.max(lastSeq, message.seq);
+  print(message);
+}
 
 let lastSeq = 0;
 
@@ -201,6 +238,8 @@ for (const text of args.say) {
   await send(text);
   console.log(`  you │ ${text}`);
 }
+
+if (args.photo.length > 0) await sendPhotos(args.photo, args.caption);
 
 if (args.chat) {
   console.log("Chatting: type a message and press Enter. Ctrl+C to quit.");

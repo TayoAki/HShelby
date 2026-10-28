@@ -1,6 +1,7 @@
 import { parseKeyring } from "@hshelby/core";
 import { createDb } from "@hshelby/db";
 import { createApnsClient } from "@hshelby/push";
+import { createStorage, storageConfigFromEnv } from "@hshelby/storage";
 import { PgBoss } from "pg-boss";
 import pino from "pino";
 import { startWorker } from "./worker";
@@ -17,7 +18,11 @@ const apns = createApnsClient();
 const boss = new PgBoss({ connectionString, schema: "pgboss", useListenNotify: true });
 boss.on("error", (err) => logger.error({ err }, "pg-boss error"));
 
-const queues = await startWorker({ db, boss, apns, keyring: parseKeyring(process.env.ENC_KEYS), logger });
+// photos: optional, like in the API
+const storageConfig = storageConfigFromEnv(process.env);
+const storage = storageConfig ? createStorage(storageConfig) : null;
+
+const queues = await startWorker({ db, boss, apns, keyring: parseKeyring(process.env.ENC_KEYS), storage, logger });
 logger.info({ queues }, "worker started");
 
 for (const signal of ["SIGTERM", "SIGINT"] as const) {

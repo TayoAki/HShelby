@@ -7,6 +7,7 @@
     "@hshelby/core": "*",
     "@hshelby/db": "*",
     "@hshelby/push": "*",
+    "@hshelby/storage": "*",
     "drizzle-orm": "0.45.4",
     "jose": "^6.2.13",
     "pg": "^8.23.1",

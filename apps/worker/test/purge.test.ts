@@ -36,7 +36,7 @@ it("purges deleted apps with every device, conversation and message, and leaves 
   const kept = await appWithHistory(organizationId, 1);
   await db.update(apps).set({ deletedAt: new Date() }).where(eq(apps.id, doomed.appId));
 
-  const purged = await purgeDeletedApps(db);
+  const purged = await purgeDeletedApps(db, null);
   expect(purged.apps).toBeGreaterThanOrEqual(1);
   expect(purged.devices).toBeGreaterThanOrEqual(3);
 
