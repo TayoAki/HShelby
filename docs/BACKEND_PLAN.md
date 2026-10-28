@@ -73,6 +73,7 @@ B2 (photos) as built:
 - **Teammates:** `POST /api/conversations/:id/attachments` (multipart `file`; the 1.1 MB body limit applies to that route only) checks and stores the photo, and the reply sends it with `attachmentIds`. The dashboard redraws each picked photo in the browser (EXIF orientation applied, metadata dropped, longest side 2048 px, PNG kept when it fits, otherwise JPEG at falling quality until ≤1 MB), uploads it as soon as it's picked, and shows photos in the thread with a full-size viewer.
 - **Without a bucket** (no `S3_*` variables) photos are off: uploads answer `uploads_not_configured` (503) and text messaging works as before.
 - **Simulator:** `--photo PATH` (repeatable) and `--caption` run the SDK's upload flow.
+- **Checked on staging** (Railway Bucket): the bucket itself refuses a PUT whose bytes don't match the signed SHA-256 (400 `XAmzContentSHA256Mismatch`) or whose length or content type differs (403 `SignatureDoesNotMatch`); an unsigned GET is 403, and signed GETs come back with the overridden type. The server's own checks stay, since other providers (and the moto server in tests) don't enforce these.
 - **Deferred:** thumbnails (the dashboard and SDK show the ≤2048 px original), photos in Telegram (B8).
 
 Where B0 differs from the plan below:
@@ -91,7 +92,7 @@ Railway layout:
 | `Postgres` | Railway template | |
 | `photos` | Railway Bucket | Private; read and written only through presigned URLs and the API. |
 
-Service settings live on the services themselves (Railway's JSON config-as-code is deprecated). Watch patterns limit redeploys to the paths each service uses.
+Service settings live on the services themselves (Railway's JSON config-as-code is deprecated). Watch patterns limit redeploys to the paths each service uses: its app, every workspace package it bundles (directly or through another package), the root `package.json`, `package-lock.json` and `tsconfig.base.json`. When an app gains a workspace dependency, add that package's path to the service's watch patterns, or a change made only in the package won't redeploy it.
 
 Variables (secrets are set in Railway only, never in the repo):
 

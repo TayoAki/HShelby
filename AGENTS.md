@@ -18,6 +18,7 @@ npm-workspaces monorepo. Node 22.
 - Local Postgres for tests: `TEST_DATABASE_URL` (default `postgres://postgres@localhost:5433/hshelby_test`).
 - Local S3 for photo tests: `TEST_S3_ENDPOINT` (default `http://127.0.0.1:5070`); run `pip install "moto[server]" && moto_server -p 5070`.
 - Checks before pushing: `npm run typecheck && npm run lint && npm test && npm run build`.
+- Railway redeploys a service only when its watch patterns match the change. When an app gains a workspace dependency, add that package's path to the service's watch patterns (see `docs/BACKEND_PLAN.md` Status).
 - Plan and phases: `docs/BACKEND_PLAN.md`. Stripe runs in test mode only; the API refuses `sk_live_` keys.
 
 The Next.js apps use Next 16, which differs from older versions: read `node_modules/next/dist/docs/` before changing Next.js code (`next dev` also writes its own `AGENTS.md` block inside each Next app).
