@@ -3,6 +3,7 @@ import { brand } from "@hshelby/contracts";
 import { base62, uuidv7 } from "@hshelby/core";
 import {
   accounts,
+  auditEvents,
   invitations,
   members,
   organizations,
@@ -43,6 +44,8 @@ type AuthDeps = { db: Db; env: Env; logger: Logger; stripe: Stripe | null; billi
 
 export function createAuth({ db, env, logger, stripe: stripeClient, billing }: AuthDeps) {
   const trustedOrigins = [env.BETTER_AUTH_URL, ...(env.TRUSTED_ORIGINS?.split(",").map((s) => s.trim()) ?? [])];
+  const audit = (organizationId: string, userId: string | null, action: string, target: string, metadata: Record<string, unknown>) =>
+    db.insert(auditEvents).values({ id: uuidv7(), organizationId, userId, action, target, metadata });
 
   const plugins = [
     organization({
@@ -59,6 +62,19 @@ export function createAuth({ db, env, logger, stripe: stripeClient, billing }: A
           if (!(await billing.isActive(organization.id))) {
             throw new APIError("PAYMENT_REQUIRED", { code: "subscription_inactive", message: "Subscribe to invite teammates." });
           }
+        },
+        // the team's own changes go in the audit log (Better Auth doesn't say who removed someone or changed a role)
+        async afterCreateInvitation({ invitation, inviter, organization }) {
+          await audit(organization.id, inviter.id, "invitation.created", invitation.id, { email: invitation.email, role: invitation.role });
+        },
+        async afterAddMember({ member, user, organization }) {
+          await audit(organization.id, user.id, "member.added", member.userId, { name: user.name, email: user.email, role: member.role });
+        },
+        async afterRemoveMember({ member, user, organization }) {
+          await audit(organization.id, null, "member.removed", member.userId, { name: user.name, email: user.email });
+        },
+        async afterUpdateMemberRole({ member, previousRole, user, organization }) {
+          await audit(organization.id, null, "member.role_changed", member.userId, { name: user.name, email: user.email, from: previousRole, to: member.role });
         },
       },
     }),

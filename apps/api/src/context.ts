@@ -9,6 +9,7 @@ import type { Auth } from "./auth";
 import type { Billing } from "./billing";
 import type { Env } from "./env";
 import type { Jobs } from "./jobs";
+import type { RateLimiter } from "./rate-limit";
 
 export type Deps = {
   db: Db;
@@ -31,6 +32,7 @@ export type Deps = {
   appStoreRoots?: string[];
   /** Claude for AI replies; null without ANTHROPIC_API_KEY. */
   anthropic: Anthropic | null;
+  rateLimiter: RateLimiter;
 };
 
 type SessionResult = NonNullable<Awaited<ReturnType<Auth["api"]["getSession"]>>>;

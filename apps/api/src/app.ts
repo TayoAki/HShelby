@@ -6,8 +6,10 @@ import { secureHeaders } from "hono/secure-headers";
 import type { AppEnv, Deps, SdkEnv } from "./context";
 import { ApiError } from "./errors";
 import { requireOrg, requireSession } from "./middleware";
+import { LIMITS, RateLimited } from "./rate-limit";
 import { accountRoutes } from "./routes/account";
 import { aiRoutes } from "./routes/ai";
+import { auditRoutes } from "./routes/audit";
 import { appearanceRoutes, assetRoutes, profilePhotoRoutes, publicAppearanceRoutes } from "./routes/appearance";
 import { appRoutes } from "./routes/apps";
 import { automationRoutes } from "./routes/automations";
@@ -66,6 +68,7 @@ export function createApp(deps: Deps) {
   api.use("*", (c, next) => (uploads.find(([path]) => path.test(c.req.path))?.[1] ?? smallBody)(c, next));
   api.use("*", requireSession(deps), requireOrg(deps));
   api.route("/", accountRoutes(deps));
+  api.route("/", auditRoutes(deps));
   api.route("/apps", appRoutes(deps));
   api.route("/apps", pushRoutes(deps));
   api.route("/apps", telegramSettingsRoutes(deps));
@@ -81,7 +84,10 @@ export function createApp(deps: Deps) {
 
   // Webhooks from third parties, each authenticated its own way.
   const webhooks = new Hono();
-  webhooks.use("*", limitBody(256));
+  webhooks.use("*", limitBody(256), async (c, next) => {
+    deps.rateLimiter.hit(LIMITS.webhook, c.req.path);
+    await next();
+  });
   webhooks.route("/telegram", telegramWebhookRoutes(deps));
   webhooks.route("/", providerWebhookRoutes(deps, { roots: deps.appStoreRoots }));
   app.route("/webhooks", webhooks);
@@ -97,6 +103,7 @@ export function createApp(deps: Deps) {
 
   app.onError((err, c) => {
     if (err instanceof ApiError) {
+      if (err instanceof RateLimited) c.header("Retry-After", String(err.retryAfterSeconds));
       return c.json({ error: { code: err.code, message: err.message } }, err.status);
     }
     deps.logger.error({ err, requestId: c.get("requestId") }, "unhandled error");

@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { authClient } from "@/lib/auth-client";
+import { isAdmin, useMe } from "@/lib/use-me";
 import { SignOutButton } from "./AuthGate";
 import { BrandMark } from "./ui";
 
@@ -16,6 +17,8 @@ const links = [
 export function AppHeader({ className = "" }: { className?: string }) {
   const pathname = usePathname();
   const { data } = authClient.useSession();
+  // owners and admins also get the workspace's audit log
+  const shown = isAdmin(useMe()) ? [...links, { href: "/audit", label: "Audit log" } as const] : links;
   return (
     <header className={`flex h-16 shrink-0 items-center justify-between gap-6 ${className}`}>
       <div className="flex items-center gap-6">
@@ -23,7 +26,7 @@ export function AppHeader({ className = "" }: { className?: string }) {
           <BrandMark />
         </Link>
         <nav className="flex gap-1 text-[14px]">
-          {links.map(({ href, label }) => {
+          {shown.map(({ href, label }) => {
             const active = pathname === href || pathname.startsWith(`${href}/`);
             return (
               <Link

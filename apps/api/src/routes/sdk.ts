@@ -24,6 +24,7 @@ import { decryptSecret, newDeviceSecret, uuidv7 } from "@hshelby/core";
 import { appAppearance, apps, attachments, automations, conversations, devices, type Db, type Tx } from "@hshelby/db";
 import { and, count, eq, gt, isNull, ne, sql } from "drizzle-orm";
 import { Hono } from "hono";
+import { createMiddleware } from "hono/factory";
 import type { Deps, SdkEnv } from "../context";
 import { getAiSettings } from "../ai/consider";
 import { onEvent } from "../automations/engine";
@@ -33,6 +34,7 @@ import { ApiError } from "../errors";
 import { nextIdentity, nextMetadata, sendingState, toSdkIdentity, verifyIdentityToken } from "../identity";
 import { appendUserMessage, markUserRead, pageMessages, type ConversationRow, type MessageRow, type PagedMessage } from "../messaging";
 import { requireDevice } from "../middleware";
+import { ipKey, LIMITS, type Limit } from "../rate-limit";
 import {
   attachmentsByMessage,
   devicePrefix,
@@ -175,7 +177,21 @@ async function releasePushToken(db: Db | Tx, appId: string, token: string, keepD
 export function sdkRoutes(deps: Deps) {
   const { db } = deps;
   const r = new Hono<SdkEnv>();
-  const auth = requireDevice(deps);
+  const limits = deps.rateLimiter;
+  const device = requireDevice(deps);
+  /** The device's access token, then its per-device limit. */
+  const auth = createMiddleware<SdkEnv>((c, next) =>
+    device(c, async () => {
+      limits.hit(LIMITS.device, c.get("device").id);
+      await next();
+    }),
+  );
+  /** One more limit for an expensive or abusable call, after `auth`. */
+  const limited = (limit: Limit) =>
+    createMiddleware<SdkEnv>(async (c, next) => {
+      limits.hit(limit, c.get("device").id);
+      await next();
+    });
 
   /** Verifies a token against the app's current secret; rotating the secret invalidates old tokens at once. */
   const claimsFrom = (identitySecretEnc: string, token: string | undefined) =>
@@ -183,6 +199,7 @@ export function sdkRoutes(deps: Deps) {
 
   /** Public: the App ID is the only credential an install has before it registers. */
   r.post("/devices", async (c) => {
+    limits.hit(LIMITS.registerPerIp, ipKey(c));
     const input = await parseJson(c, RegisterDeviceInput);
     const [app] = await db
       .select({ id: apps.id, identitySecretEnc: apps.identitySecretEnc })
@@ -190,6 +207,7 @@ export function sdkRoutes(deps: Deps) {
       .where(and(eq(apps.publicId, input.appId), isNull(apps.deletedAt)))
       .limit(1);
     if (!app) throw new ApiError(404, "not_found", "Unknown App ID");
+    limits.hit(LIMITS.registerPerApp, app.id);
 
     const claims = await claimsFrom(app.identitySecretEnc, input.identityToken);
     const identity = nextIdentity({ userIdExt: null, verified: false }, input.identity, claims);
@@ -222,6 +240,7 @@ export function sdkRoutes(deps: Deps) {
   });
 
   r.post("/session/refresh", async (c) => {
+    limits.hit(LIMITS.sessionPerIp, ipKey(c));
     const { deviceSecret } = await parseJson(c, RefreshInput);
     const [device] = await db
       .select({ id: devices.id, appId: devices.appId, sessionVersion: devices.sessionVersion })
@@ -247,6 +266,7 @@ export function sdkRoutes(deps: Deps) {
    * the history for the team. Takes the device secret so the SDK can retry it until it succeeds.
    */
   r.post("/session/logout", async (c) => {
+    limits.hit(LIMITS.sessionPerIp, ipKey(c));
     const { deviceSecret } = await parseJson(c, LogoutInput);
     await db
       .update(devices)
@@ -329,7 +349,7 @@ export function sdkRoutes(deps: Deps) {
    * An upload ticket for one photo: a presigned PUT for the declared type, size and SHA-256. The photo is
    * checked against those when a message is sent with it; unsent uploads are removed after a day.
    */
-  r.post("/uploads", auth, async (c) => {
+  r.post("/uploads", auth, limited(LIMITS.uploads), async (c) => {
     const storage = requireStorage(deps.storage);
     const input = await parseJson(c, UploadRequest);
     const device = c.get("device");
@@ -376,7 +396,7 @@ export function sdkRoutes(deps: Deps) {
   });
 
   /** 201 for a new message, 200 with the stored one when the clientId was already sent. */
-  r.post("/messages", auth, async (c) => {
+  r.post("/messages", auth, limited(LIMITS.sends), async (c) => {
     const input = await parseJson(c, SendMessageInput);
     const device = c.get("device");
     const app = c.get("app");
@@ -432,7 +452,7 @@ export function sdkRoutes(deps: Deps) {
    * An event the app tracked (`paywall_declined`…): runs the automations listening for it. Runs that send right
    * away do so before answering, so `openChat` can open the chat on the message.
    */
-  r.post("/track", auth, async (c) => {
+  r.post("/track", auth, limited(LIMITS.track), async (c) => {
     const { event } = await parseJson(c, TrackInput);
     // subscription events come from the providers, never from the app
     if (isSubscriptionEvent(event)) throw new ApiError(400, "validation_failed", "event: subscription events come from your subscription provider");

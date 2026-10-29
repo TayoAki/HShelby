@@ -12,6 +12,7 @@ import type { Deps } from "./context";
 import { deriveDeviceTokenKey } from "./device-tokens";
 import { aiEnabled, billingEnabled, type Env } from "./env";
 import { createJobs } from "./jobs";
+import { createRateLimiter } from "./rate-limit";
 
 function storageFromEnv(env: Env) {
   const config = storageConfigFromEnv(env);
@@ -48,6 +49,7 @@ export function createDeps(
         : aiEnabled(env)
           ? new Anthropic({ apiKey: env.ANTHROPIC_API_KEY, baseURL: env.ANTHROPIC_BASE_URL, maxRetries: 3, timeout: 90_000 })
           : null,
+    rateLimiter: createRateLimiter(env.RATE_LIMIT_SCALE),
   };
   return { deps, pool };
 }

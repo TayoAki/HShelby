@@ -14,9 +14,11 @@ import { appAppearance, apps, assets, auditEvents, userPhotos, type Db } from "@
 import { ImageRejected, toAssetPng, toProfilePhoto } from "@hshelby/storage/convert";
 import { and, arrayContains, desc, eq, inArray, isNull, or, sql, sum } from "drizzle-orm";
 import { Hono } from "hono";
+import { createMiddleware } from "hono/factory";
 import type { AppEnv, Deps } from "../context";
 import { ApiError, notFound } from "../errors";
 import { requireOrgAdmin } from "../middleware";
+import { ipKey, LIMITS } from "../rate-limit";
 import { requireStorage } from "../photos";
 import { isUuid, parseJson } from "../validation";
 import { findOrgApp } from "./apps";
@@ -327,6 +329,14 @@ function withAssetUrls(doc: AppearanceDocument, base: string): Record<string, un
 export function publicAppearanceRoutes(deps: Deps) {
   const { db } = deps;
   const r = new Hono();
+
+  // only these paths: this router is mounted at the root of /v1, next to the SDK's routes
+  const perIp = createMiddleware(async (c, next) => {
+    deps.rateLimiter.hit(LIMITS.publicPerIp, ipKey(c));
+    await next();
+  });
+  r.use("/apps/*", perIp);
+  r.use("/assets/*", perIp);
 
   r.get("/apps/:appId/appearance", async (c) => {
     const [row] = await db

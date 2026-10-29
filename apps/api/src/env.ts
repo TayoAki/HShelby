@@ -49,6 +49,8 @@ const EnvSchema = z.object({
   ANTHROPIC_BASE_URL: optional,
   /** How long after a person's last message the AI answers, so a burst of messages gets one answer. */
   AI_DEBOUNCE_MS: z.coerce.number().int().min(0).default(8000),
+  /** Multiplies every rate limit (src/rate-limit.ts); 0 turns them off. */
+  RATE_LIMIT_SCALE: z.coerce.number().min(0).default(1),
 });
 
 export type Env = z.infer<typeof EnvSchema>;

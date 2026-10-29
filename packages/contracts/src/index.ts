@@ -48,6 +48,7 @@ export const errorCodes = [
   "integration_not_connected",
   "invalid_signature",
   "ai_unavailable",
+  "rate_limited",
   "internal_error",
 ] as const;
 export type ErrorCode = (typeof errorCodes)[number];
@@ -140,3 +141,25 @@ export * from "./push";
 export * from "./realtime";
 export * from "./subscriptions";
 export * from "./telegram";
+
+/* ---------- audit log (phase B12) ---------- */
+
+export const AuditQuery = z.object({
+  cursor: z.string().max(200).optional(),
+  limit: z.coerce.number().int().min(1).max(100).default(50),
+});
+export type AuditQuery = z.infer<typeof AuditQuery>;
+
+/** Who did what to which app, device or teammate. `actor` is null when the change didn't come from a signed-in teammate. */
+export const AuditEvent = z.object({
+  id: z.string(),
+  action: z.string(),
+  actor: z.object({ id: z.string(), name: z.string(), email: z.string() }).nullable(),
+  target: z.object({ id: z.string(), label: z.string().nullable() }).nullable(),
+  metadata: z.record(z.string(), z.unknown()).nullable(),
+  createdAt: z.string(),
+});
+export type AuditEvent = z.infer<typeof AuditEvent>;
+
+export const AuditPage = z.object({ events: z.array(AuditEvent), nextCursor: z.string().nullable() });
+export type AuditPage = z.infer<typeof AuditPage>;

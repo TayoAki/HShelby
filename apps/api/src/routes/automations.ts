@@ -1,6 +1,6 @@
 import { customerLabel, AutomationInput, type Automation, type AutomationResults, type RunReason, type RunStatus } from "@hshelby/contracts";
 import { uuidv7 } from "@hshelby/core";
-import { automationRuns, automations, devices, members } from "@hshelby/db";
+import { auditEvents, automationRuns, automations, devices, members } from "@hshelby/db";
 import { and, desc, eq, inArray, isNotNull, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import type { AppEnv, Deps } from "../context";
@@ -33,6 +33,9 @@ export function automationRoutes(deps: Deps) {
     return { app, row };
   }
 
+  const audit = (orgId: string, userId: string, action: string, row: Row) =>
+    db.insert(auditEvents).values({ id: uuidv7(), organizationId: orgId, userId, action, target: row.appId, metadata: { automationId: row.id, name: row.name } });
+
   /** The sender must be a teammate in this workspace. */
   async function checkSender(orgId: string, senderUserId: string | null) {
     if (!senderUserId) return;
@@ -64,6 +67,7 @@ export function automationRoutes(deps: Deps) {
         createdBy: c.get("user").id,
       })
       .returning();
+    await audit(org.id, c.get("user").id, "automation.created", row!);
     return c.json({ automation: toAutomation(row!) }, 201);
   });
 
@@ -78,6 +82,7 @@ export function automationRoutes(deps: Deps) {
       .set({ name: input.name, enabled: input.enabled, triggerEvent: input.trigger.event, definition: input, senderUserId: input.senderUserId, updatedAt: new Date() })
       .where(eq(automations.id, row.id))
       .returning();
+    await audit(org.id, c.get("user").id, "automation.updated", updated!);
     return c.json({ automation: toAutomation(updated!) });
   });
 
@@ -85,6 +90,7 @@ export function automationRoutes(deps: Deps) {
   r.delete("/:id/automations/:automationId", requireOrgAdmin, async (c) => {
     const { row } = await find(c.get("org").id, c.req.param("id"), c.req.param("automationId"));
     await db.delete(automations).where(eq(automations.id, row.id));
+    await audit(c.get("org").id, c.get("user").id, "automation.deleted", row);
     return c.body(null, 204);
   });
 

@@ -41,6 +41,8 @@ export async function makeTestApp(overrides: Parameters<typeof createDeps>[1] = 
     BETTER_AUTH_SECRET: randomBytes(32).toString("base64"),
     ENC_KEYS: `v1:${randomBytes(32).toString("base64")}`,
     PUBLIC_API_URL: "https://api.test",
+    // tests register many devices from one address; the rate limit tests turn limits back on
+    RATE_LIMIT_SCALE: "0",
     ...extraEnv,
   });
   const { deps, pool } = createDeps(env, { appStore: fakeAppStore, ...overrides });
