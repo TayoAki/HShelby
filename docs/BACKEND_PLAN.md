@@ -27,7 +27,7 @@ Why one Postgres for everything at the start: messages, the job queue, realtime 
 
 ## Status
 
-**B0–B11 run on Railway staging** (billing is switched off there until the Stripe test secret key is set, and AI replies until `ANTHROPIC_API_KEY` is) (project `hshelby`, environment `staging`): dashboard at `https://dashboard-staging-0dee.up.railway.app`, API at `https://api-staging-f8f8.up.railway.app`.
+**B0–B12 run on Railway staging** (billing is switched off there until the Stripe test secret key is set, and AI replies until `ANTHROPIC_API_KEY` is) (project `hshelby`, environment `staging`): dashboard at `https://dashboard-staging-0dee.up.railway.app`, API at `https://api-staging-f8f8.up.railway.app`.
 
 B1 (messaging core) as built:
 
@@ -177,6 +177,15 @@ B11 (AI replies) as built:
 - **Eval** (`apps/api/eval`): 24 labelled cases for a made-up app (how-tos, restore, cancel, angry refund demands, asking for a human, offers with and without a paywall, rating requests with and without a recent ask, a crash report, questions the docs don't answer, Spanish, a prompt injection, account deletion, "are you a bot", a burst, a photo, offers switched off), graded in code (the choice, regexes the answer must and mustn't match, the offered paywall). `ANTHROPIC_API_KEY=… npm run eval -w @hshelby/api` runs it against the real model (24 model calls, well under a dollar) and fails under 90%. `npm run eval:export -w @hshelby/api -- --app <UUID>` turns an app's resolved conversations into cases with the team's answer as the reference (git-ignored: real people's messages), to label and add.
 - **Tests:** `apps/api/test/ai.test.ts` against a fake Messages API (`test/fake-anthropic.ts`): the request shape (model, effort, fallbacks beta, strict tools, cached system), the debounce, pausing and handing back, both double-reply races, retries, each guardrail, refusals, a fallback answer, service failures and the preview. `telegram.test.ts` covers the handover post.
 - **Not checked here:** the real model. There's no `ANTHROPIC_API_KEY` in this environment or on staging yet, so the eval hasn't been run; set the key and run it before turning AI replies on for an app. Before production, add Anthropic to the DPA's subprocessor list.
+
+B12 (hardening) as built:
+
+- **Rate limits** (`apps/api/src/rate-limit.ts`): fixed windows counted in each API process, `429 rate_limited` with `Retry-After`. Registrations: 30 per hashed address per 10 minutes and 600 per app per minute; token refresh and logout: 120 per address per minute; every SDK call: 300 per device per minute, with sends at 30, photo uploads at 20 and tracked events at 60; the public appearance and library images: 300 per address per minute; webhooks: 1,200 deliveries per URL per minute. The address is Railway's `X-Real-IP`, hashed and kept only for the window. `RATE_LIMIT_SCALE` multiplies them (0 turns them off; a load test raises it). With several replicas each counts its own share; moving the counters to Postgres or Redis changes only that file.
+- **Audit log:** `GET /api/audit` (owners and admins; newest first, keyset pages of up to 100) with who did it and to what (app, or person by their label). Invitations, members joining or leaving and role changes (Better Auth's organization hooks), and automations created, changed or deleted are now audited alongside the earlier events. The dashboard's Audit log page (header link for admins) describes each event in words.
+- **Load test** (`apps/api/scripts/load-test.ts`): a throwaway workspace and app, 1,000 devices polling `GET /v1/unread` every 5 s (≈200 requests/s) and 50 messages/s from random devices for 3 minutes. On staging (one api replica, Railway's default Postgres) the api's own p95 stayed at 42–47 ms under load and 82 ms in the minute the 1,000 devices registered, with nothing failing; the api peaked at 0.44 vCPU and 225 MB, Postgres at 0.43 vCPU. Postgres pub/sub, in-process rate limits and pg-boss hold this load, so Redis isn't needed yet. How to run it is in [`RUNBOOK.md`](RUNBOOK.md).
+- **Restore drill** (`packages/db/scripts/restore-drill.sh`): dump, restore into a scratch database, compare every table's row count and the latest migration. Run on staging 2026-10-29 from a temporary `postgres:18-alpine` service: 20 MB database, dump 1 s (849 KB), restore 1 s, all 45 tables match, latest migration `0011_ai`, 4 s in all. The procedure, the incident restore steps (volume backups, point-in-time recovery) and the results table are in [`RUNBOOK.md`](RUNBOOK.md).
+- **Tests:** `apps/api/test/rate-limit.test.ts` (per-address registrations with `Retry-After`, per-device sends while polling still works, windows resetting, scale 0) and `apps/api/test/audit.test.ts` (events with actor and target, paging, admins only, other workspaces see nothing).
+- **Not done here:** scheduled volume backups and point-in-time recovery are switches on the Postgres service in Railway's dashboard; turn them on for production (the runbook says which). Cloudflare in front of the API is still optional.
 
 Where B0 differs from the plan below:
 
@@ -490,10 +499,10 @@ All bodies are Zod-validated. Errors use `{error: {code, message}}` with stable 
 - [ ] All secrets encrypted at rest. Revealed in the dashboard only to admins, and every reveal or rotation is logged.
 - [ ] Device secrets and invitation tokens stored hashed. Access tokens short-lived and revocable through `session_version`.
 - [ ] Webhook signatures verified before parsing anything else. Raw bodies kept for HMAC checks.
-- [ ] Rate limits per device, per app and per hashed IP (start in Postgres or in-process; Cloudflare rules in front).
+- [x] Rate limits per device, per app and per hashed IP (in-process since B12; Cloudflare rules in front still optional).
 - [ ] Upload type/size/dimension checks server-side, checksum verified, signed GETs only.
 - [ ] No message bodies in logs (log IDs). PII deletion paths tested end to end.
-- [ ] Backups: daily Postgres snapshots plus a monthly restore drill.
+- [ ] Backups: daily Postgres snapshots plus a monthly restore drill. (The drill and the restore steps are in `RUNBOOK.md`; the snapshot schedule and point-in-time recovery are switched on in Railway's dashboard.)
 
 ---
 
@@ -516,7 +525,7 @@ Each phase ends with acceptance tests that must pass in CI and on staging.
 | **B9 Appearance & assets** (done, see Status) | Draft/publish remote appearance, asset library (PNG ≤ 512 px), team photos | SDK fetches the published version; drafts never leak | 1 wk |
 | **B10 Subscriptions + automations** (done, see Status) | Four provider receivers, normalization, matching, automation builder API, run engine with waits, suppression, holds, results | Replaying each provider's fixture set yields the expected canonical events; a "cancelled → offer tomorrow 10:00 local" run fires at the right UTC time across 3 time zones | 3 wks |
 | **B11 AI replies** (built; real-model eval pending, see Status) | See §11 | Eval set passes the bar you set; handover never double-replies | 2–3 wks |
-| **B12 Hardening** | Load test, Redis if needed, audit log, restore drill | 1,000 polling devices + 50 msgs/s holds p95 < 150 ms on staging | 1 wk |
+| **B12 Hardening** (done, see Status) | Load test, Redis if needed, audit log, restore drill | 1,000 polling devices + 50 msgs/s holds p95 < 150 ms on staging | 1 wk |
 
 **Totals:** MVP backend ≈ 6–7 weeks; parity without AI ≈ 4 months; with AI ≈ 4.5 months. These are backend-only numbers; the full-product estimates in the teardown (§7.2) add the SDK, React Native wrapper and dashboard UI.
 
@@ -535,7 +544,7 @@ Each phase ends with acceptance tests that must pass in CI and on staging.
 - **Concurrency tests** for seq/idempotency; **fixture tests** for every webhook provider (payloads copied from their docs); **contract tests** that the OpenAPI matches the routes.
 - **Environments:** Railway `staging` and `production`, plus PR environments for the API. Migrations run as a pre-deploy step; every migration has to work alongside the previous app version (expand → migrate → contract).
 - **Observability:** pino JSON logs, Sentry for errors, and three dashboards from day one: API latency, pg-boss queue depth and failures, push/Telegram error rates.
-- **Backups:** Railway Postgres backups plus a monthly restore into staging.
+- **Backups:** Railway Postgres volume backups and point-in-time recovery, plus a monthly restore drill. Procedures in [`RUNBOOK.md`](RUNBOOK.md).
 
 ---
 
