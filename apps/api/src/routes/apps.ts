@@ -1,12 +1,21 @@
-import { CreateAppInput, RotateIdentitySecretInput, UpdateAppInput, type App as AppDto } from "@hshelby/contracts";
+import {
+  CardSettingsInput,
+  CardStatsQuery,
+  CreateAppInput,
+  RotateIdentitySecretInput,
+  UpdateAppInput,
+  type App as AppDto,
+  type AppPaywall,
+} from "@hshelby/contracts";
 import { buildSetupPrompt, decryptSecret, encryptSecret, newIdentitySecret, newPublicAppId, uuidv7 } from "@hshelby/core";
-import { apps, auditEvents, devices, type Db } from "@hshelby/db";
+import { appPaywalls, apps, auditEvents, cardSettings, devices, type Db } from "@hshelby/db";
 import { and, desc, eq, isNull } from "drizzle-orm";
 import { Hono } from "hono";
+import { cardStats, getCardSettings } from "../cards";
 import type { AppEnv, Deps } from "../context";
 import { ApiError, isUniqueViolation, notFound } from "../errors";
 import { isAdminRole, requireOrgAdmin } from "../middleware";
-import { isUuid, parseJson } from "../validation";
+import { isUuid, parseJson, parseQuery } from "../validation";
 
 type AppRow = typeof apps.$inferSelect;
 
@@ -103,16 +112,22 @@ export function appRoutes(deps: Deps) {
   r.patch("/:id", async (c) => {
     const input = await parseJson(c, UpdateAppInput);
     const org = c.get("org");
-    if (input.onlyVerified !== undefined && !isAdminRole(org.role)) {
-      throw new ApiError(403, "forbidden", "Only workspace owners and admins can change identity settings");
+    if ((input.onlyVerified !== undefined || input.appStoreId !== undefined) && !isAdminRole(org.role)) {
+      throw new ApiError(403, "forbidden", "Only workspace owners and admins can change these settings");
     }
     const app = await findApp(org.id, c.req.param("id"));
     const row = await db.transaction(async (tx) => {
       const [updated] = await tx
         .update(apps)
-        .set({ name: input.name, onlyVerified: input.onlyVerified, updatedAt: new Date() })
+        .set({ name: input.name, onlyVerified: input.onlyVerified, appStoreId: input.appStoreId, updatedAt: new Date() })
         .where(eq(apps.id, app.id))
-        .returning();
+        .returning()
+        .catch((err: unknown) => {
+          if (isUniqueViolation(err, "apps_org_app_store_uq")) {
+            throw new ApiError(409, "app_already_added", "Another app in this workspace has that App Store ID");
+          }
+          throw err;
+        });
       if (input.onlyVerified !== undefined && input.onlyVerified !== app.onlyVerified) {
         await tx.insert(auditEvents).values({
           id: uuidv7(),
@@ -120,6 +135,16 @@ export function appRoutes(deps: Deps) {
           userId: c.get("user").id,
           action: input.onlyVerified ? "app.only_verified.enabled" : "app.only_verified.disabled",
           target: app.id,
+        });
+      }
+      if (input.appStoreId !== undefined && input.appStoreId !== app.appStoreId) {
+        await tx.insert(auditEvents).values({
+          id: uuidv7(),
+          organizationId: org.id,
+          userId: c.get("user").id,
+          action: "app.app_store_id.changed",
+          target: app.id,
+          metadata: { from: app.appStoreId, to: input.appStoreId },
         });
       }
       return updated!;
@@ -135,6 +160,51 @@ export function appRoutes(deps: Deps) {
       await tx.insert(auditEvents).values({ id: uuidv7(), organizationId: org.id, userId: c.get("user").id, action: "app.deleted", target: app.id });
     });
     return c.body(null, 204);
+  });
+
+  /** Review templates and button labels (phase B7). Everyone can read them; admins change them. */
+  r.get("/:id/cards/settings", async (c) => {
+    const app = await findApp(c.get("org").id, c.req.param("id"));
+    return c.json(await getCardSettings(db, app));
+  });
+
+  r.put("/:id/cards/settings", requireOrgAdmin, async (c) => {
+    const input = await parseJson(c, CardSettingsInput);
+    const app = await findApp(c.get("org").id, c.req.param("id"));
+    const current = await getCardSettings(db, app);
+    const next = {
+      reviewTemplates: input.reviewTemplates ?? current.reviewTemplates,
+      reviewButtonLabels: input.reviewButtonLabels ?? current.reviewButtonLabels,
+      offerButtonLabels: input.offerButtonLabels ?? current.offerButtonLabels,
+    };
+    await db
+      .insert(cardSettings)
+      .values({ appId: app.id, ...next })
+      .onConflictDoUpdate({ target: cardSettings.appId, set: { ...next, updatedAt: new Date() } });
+    return c.json(await getCardSettings(db, app));
+  });
+
+  /** Every paywall the app's devices have reported, most recently reported first. */
+  r.get("/:id/paywalls", async (c) => {
+    const app = await findApp(c.get("org").id, c.req.param("id"));
+    const rows = await db.select().from(appPaywalls).where(eq(appPaywalls.appId, app.id)).orderBy(desc(appPaywalls.lastReportedAt));
+    const paywalls: AppPaywall[] = rows.map((p) => ({
+      id: p.paywallId,
+      title: p.title,
+      source: p.source,
+      presentable: p.presentable,
+      products: p.products,
+      firstReportedAt: p.firstReportedAt.toISOString(),
+      lastReportedAt: p.lastReportedAt.toISOString(),
+    }));
+    return c.json({ paywalls });
+  });
+
+  /** Cards sent and first opens over 7, 30 or 90 days. */
+  r.get("/:id/cards/stats", async (c) => {
+    const { days } = parseQuery(c, CardStatsQuery);
+    const app = await findApp(c.get("org").id, c.req.param("id"));
+    return c.json(await cardStats(db, app.id, days));
   });
 
   r.get("/:id/status", async (c) => {

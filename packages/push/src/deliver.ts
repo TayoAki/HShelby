@@ -1,4 +1,4 @@
-import { isInChat, type PushEnvironment } from "@hshelby/contracts";
+import { isInChat, messagePreview, type PushEnvironment } from "@hshelby/contracts";
 import { decryptSecret, type Keyring } from "@hshelby/core";
 import { apps, conversations, devices, messages, pushConfigs, users, type Db } from "@hshelby/db";
 import { and, desc, eq, isNotNull, isNull, sql } from "drizzle-orm";
@@ -101,7 +101,8 @@ export async function deliverMessagePush(
     payload: buildPushPayload(row.config, {
       appName: row.appName,
       authorName: row.authorName,
-      message: row.message.text || "Sent a photo",
+      // photo-only messages and cards may have no text
+      message: row.message.text || (row.message.kind === "text" ? "Sent a photo" : messagePreview(row.message)),
       conversationId: row.conversation.id,
       messageId: row.message.id,
       // read at send time, so it includes this reply and anything the user has read since

@@ -6,6 +6,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import { AppHeader } from "@/components/AppHeader";
+import { PaywallsCard, ReviewsAndOffersCard } from "@/components/CardSettingsCards";
 import { PushSettingsCard } from "@/components/PushSettingsCard";
 import { CopyBlock, secondaryButton, SettingsCard, SwitchRow } from "@/components/settings";
 import { AppIcon, ErrorNote, Spinner } from "@/components/ui";
@@ -182,6 +183,8 @@ export default function AppSettingsPage() {
           </SettingsCard>
 
           <PushSettingsCard app={app} admin={admin} />
+          <ReviewsAndOffersCard app={app} admin={admin} onAppChange={setApp} />
+          <PaywallsCard app={app} />
         </main>
       )}
     </div>

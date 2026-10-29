@@ -27,7 +27,7 @@ Why one Postgres for everything at the start: messages, the job queue, realtime 
 
 ## Status
 
-**B0–B6 run on Railway staging** (billing is switched off there until the Stripe test secret key is set) (project `hshelby`, environment `staging`): dashboard at `https://dashboard-staging-0dee.up.railway.app`, API at `https://api-staging-f8f8.up.railway.app`.
+**B0–B7 run on Railway staging** (billing is switched off there until the Stripe test secret key is set) (project `hshelby`, environment `staging`): dashboard at `https://dashboard-staging-0dee.up.railway.app`, API at `https://api-staging-f8f8.up.railway.app`.
 
 B1 (messaging core) as built:
 
@@ -60,7 +60,7 @@ B3 (push) as built:
 - **APNs answers:** 410 drops the token; device rejections (BadDeviceToken, DeviceTokenNotForTopic) are kept as the device's push issue; key rejections (403, BadTopic) flag the app's settings; 429/5xx/timeouts retry with exponential backoff (5 retries) and are recorded on the last attempt. A delivery clears earlier issues.
 - **Dashboard:** app Settings has a Push notifications card: `.p8` upload (validated, stored encrypted, never returned; the Key ID is read from Apple's file name), Key/Team/Bundle IDs, templates with a live preview, "Send test" to up to 10 recent devices with per-device results, and remove. Device details show notification status and the last push issue. Changes are admin-only and audited.
 - **Not verified here:** delivery to a real iPhone. That needs an Apple key and a device; everything up to Apple's servers is tested against the fake APNs.
-- **Deferred:** per-language templates, offer-card pushes (B7). (Skipping the push while the user is in the chat came with B6.)
+- **Deferred:** per-language templates. (Skipping the push while the user is in the chat came with B6, card pushes with B7.)
 
 B2 (photos) as built:
 
@@ -98,6 +98,22 @@ B6 (realtime) as built:
 - **Dashboard:** one socket per tab with reconnect and backoff. The inbox and the open thread update live; polling drops to every 30 s while the socket is up (3–5 s otherwise). It shows "In chat" badges, "Chat open" in the device details, and typing both ways.
 - **Simulator:** `--chat` uses the live socket (heartbeats, typing on keypress, team typing and read receipts printed) and polls only while it's down.
 - **Done-when test** (`apps/api/test/realtime.test.ts`): two API instances on one database; a reply sent through A reaches a dashboard socket and the user's socket on B in 17–19 ms locally, including the HTTP request and the transaction (the target is under 300 ms). The same file covers read receipts, workspace isolation, resync after a dropped listener, typing, presence and refused credentials.
+
+B7 (cards) as built:
+
+- **Paywall reports:** `POST /v1/devices` and `PATCH /v1/device` take `paywalls: [{id, title, source, presentable, products}]`, the paywalls the app can show right now (IDs 1–64 of `[A-Za-z0-9_.-]`, titles ≤60, at most 20 paywalls and 40 products, IDs unique). Each report replaces the device's list (`devices.available_paywalls`, `paywalls_reported_at`); omitting it leaves the list alone, `[]` clears it. Reports also feed the app's registry (`app_paywalls`), which rewrites a row only when it changed or is over an hour old, so an SDK that reports on every foreground doesn't write every time.
+- **Cards** are agent messages with `kind` `review` or `paywall` and a stored `card` (`messages.card`). `POST /api/conversations/:id/cards {kind, clientId, text?, buttonLabel?, scenario? | paywallId, confirmRepeat?}` goes through the same append transaction as replies (seq, idempotent `clientId`, push, live event) and is gated like replies.
+  - An **offer** must name a paywall the device last reported and can present, else 422 `paywall_unavailable`. The card keeps the paywall's title as it was when sent; the SDK sees only `{type, paywallId, buttonLabel}`.
+  - A **review** needs the app's App Store ID (`app_store_id_required`, 422), which admins set on the app (`PATCH /api/apps/:id {appStoreId}`, audited). The review URL is computed when the message is read, so changing or clearing the ID updates older cards (no ID: the SDK shows the text without a button). Sending one sets `devices.review_asked_at`, which automations will use to skip people already asked. `{app}` in the text becomes the app's name.
+  - **Repeat guard:** if the last card of the same kind got no reply from the user, another one needs `confirmRepeat` (409 `card_repeat_unconfirmed`); the dashboard asks the teammate to type "send review" or "send offer". It runs inside the transaction, with the conversation row locked.
+  - A null `buttonLabel` means the SDK's default ("Rate on the App Store", "View offer") in the user's language; admins can set custom labels per app.
+- **Click receipts:** `POST /v1/actions/:messageId/click {clickedAt?}` records the first tap on one of the device's cards (`messages.action_clicked_at`) and answers `{actionClickedAt, first}`; later or concurrent taps return the first one. A receipt the SDK cached offline may carry its tap time, kept between the card's sending and now. The first tap publishes an `action` event, so the dashboard shows "Alex opened the Pro yearly paywall" live.
+- **Settings and stats** (`/api/apps/:id/...`): `cards/settings` (review templates for General, After helping and After feedback, ≤500 characters with `{app}`; up to 5 button labels each for reviews and offers; admins change them), `paywalls` (the registry), and `cards/stats?days=7|30|90` (sent, first opens, by sender and by paywall; a partial index on `messages(created_at) where kind <> 'text'` keeps it cheap).
+- **Push:** a card with no text pushes "Sent an offer: Pro yearly" or "Asked for a rating". The in-chat skip applies as for replies.
+- **Dashboard:** "Ask for review" and "Send offer" in the composer (templates, the device's reported paywalls only, label choice, the repeat confirmation), cards rendered in the thread with their tap receipts, "Paywalls" and "Review asked" in the details panel, and a Reviews and offers card (App Store ID, templates, labels, activity) plus a Paywalls card on the app's settings page.
+- **Simulator:** `--paywall id=Title` (repeatable) reports paywalls; in `--chat`, cards print with their button and `/tap` sends the click receipt.
+- **Done-when tests** (`apps/api/test/cards.test.ts`): an offer for an unreported (or unpresentable, or no longer reported) paywall is refused; five racing taps record exactly one first tap, and later taps return it. The same file covers the registry, malformed reports, the review link and App Store ID permissions, the repeat guard, resends, stats and settings.
+- **Deferred:** per-language templates and "Suggested" offer text in the user's language; "Reset support" (which would keep card history).
 
 Where B0 differs from the plan below:
 
@@ -430,7 +446,7 @@ Each phase ends with acceptance tests that must pass in CI and on staging.
 | **B5 Billing** (built; real Stripe test mode pending, see Status) | Stripe Checkout/Portal/webhooks, gating middleware, founder-spot counter | Test-mode subscription toggles reply access; users can still send while lapsed | 0.5–1 wk |
 | **MVP backend** | | | **≈ 6–7 wks** |
 | **B6 Realtime** (done, see Status) | WS gateway, LISTEN/NOTIFY fan-out, typing, presence, skip-push-when-in-chat | Two API instances: a reply sent via instance A reaches a socket on B in < 300 ms | 1–1.5 wks |
-| **B7 Cards** | Review + offer cards, paywall registry from device reports, click receipts, stats | An offer card for an unreported paywall is refused; the first tap is recorded once | 1 wk |
+| **B7 Cards** (done, see Status) | Review + offer cards, paywall registry from device reports, click receipts, stats | An offer card for an unreported paywall is refused; the first tap is recorded once | 1 wk |
 | **B8 Telegram** | Connect bot, notify, reply mapping, reactions, supergroup migration, throttle | Replying in Telegram lands in the app chat; 50 bursts respect the per-chat limit | 1.5 wks |
 | **B9 Appearance & assets** | Draft/publish remote appearance, asset library (PNG ≤ 512 px), team photos | SDK fetches the published version; drafts never leak | 1 wk |
 | **B10 Subscriptions + automations** | Four provider receivers, normalization, matching, automation builder API, run engine with waits, suppression, holds, results | Replaying each provider's fixture set yields the expected canonical events; a "cancelled → offer tomorrow 10:00 local" run fires at the right UTC time across 3 time zones | 3 wks |

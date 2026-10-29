@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { InboxCard, MessageKind, ReportedPaywall, ReportedPaywalls, SdkCard } from "./cards";
 import { IdentityLabels, IdentityToken, Metadata, SdkIdentity } from "./identity";
 import { Attachment, PHOTO_LIMITS } from "./photos";
 import { DevicePush, PushRegistration } from "./push";
@@ -64,6 +65,8 @@ const DeviceState = {
   metadata: Metadata.optional(),
   /** null clears the token (e.g. notifications were turned off). */
   push: PushRegistration.nullable().optional(),
+  /** The paywalls the app can show right now (phase B7); offers can only name these. */
+  paywalls: ReportedPaywalls.optional(),
 };
 
 export const RegisterDeviceInput = z
@@ -92,7 +95,12 @@ export const SdkMessage = z.object({
   id: z.string(),
   seq: z.number().int(),
   sender: MessageSender,
+  kind: MessageKind,
   text: z.string(),
+  /** Set on review and offer messages. */
+  card: SdkCard.nullable(),
+  /** The first tap on the card's button. */
+  actionClickedAt: z.string().nullable(),
   /** Set on the device's own messages, so the SDK can match them to its pending sends. */
   clientId: z.string().nullable(),
   attachments: z.array(Attachment),
@@ -159,6 +167,11 @@ export const InboxDevice = z.object({
   inChat: z.boolean(),
   /** When the user last had the chat open. */
   lastSeenInChatAt: z.string().nullable(),
+  /** What "Send offer" can choose from: the paywalls the device last reported, and when (phase B7). */
+  paywalls: z.array(ReportedPaywall),
+  paywallsReportedAt: z.string().nullable(),
+  /** When the team last asked this device for a review. */
+  reviewAskedAt: z.string().nullable(),
 });
 export type InboxDevice = z.infer<typeof InboxDevice>;
 
@@ -197,7 +210,10 @@ export const InboxMessage = z.object({
   seq: z.number().int(),
   sender: MessageSender,
   source: z.enum(["sdk", "dashboard", "telegram", "automation", "ai"]),
+  kind: MessageKind,
   text: z.string(),
+  card: InboxCard.nullable(),
+  actionClickedAt: z.string().nullable(),
   /** Set on teammates' messages, so the dashboard can match a sent reply to its optimistic copy. */
   clientId: z.string().nullable(),
   attachments: z.array(Attachment),

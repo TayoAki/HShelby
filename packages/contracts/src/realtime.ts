@@ -34,6 +34,8 @@ export type TeamLiveEvent =
   | { type: "conversation"; conversationId: string }
   | { type: "typing"; conversationId: string; sender: "user" | "agent"; name: string | null; userId: string | null }
   | { type: "presence"; conversationId: string; inChat: boolean }
+  /** The user tapped a card's button for the first time: reload that message. */
+  | { type: "action"; conversationId: string; messageId: string }
   | { type: "resync" };
 
 /** SDK → server: the user is typing, or the chat is still on screen. */

@@ -1,4 +1,4 @@
-import type { MessagePageQuery } from "@hshelby/contracts";
+import type { MessagePageQuery, StoredCard } from "@hshelby/contracts";
 import { uuidv7 } from "@hshelby/core";
 import { apps, conversations, messages, users, type Db, type Tx } from "@hshelby/db";
 import { and, asc, count, desc, eq, gt, isNull, lt, sql } from "drizzle-orm";
@@ -104,18 +104,32 @@ export async function appendUserMessage(
   }
 }
 
+export type AgentMessageInput = {
+  organizationId: string;
+  conversationId: string;
+  authorUserId: string;
+  clientId: string;
+  text: string;
+  attachmentIds: string[];
+  /** A review or offer card (phase B7); plain text otherwise. */
+  card?: StoredCard;
+};
+
+/**
+ * Hooks that run inside the append's transaction with the conversation row locked: `before` sees the new
+ * message's seq in `conversation.lastSeq` and can refuse it by throwing; `after` runs once it's stored.
+ */
+export type AppendHooks = {
+  before?: (tx: Tx, conversation: ConversationRow) => Promise<void>;
+  after?: (tx: Tx, message: MessageRow, conversation: ConversationRow) => Promise<void>;
+};
+
 /** Appends a teammate's reply to a conversation of their organization and enqueues its push. */
 export async function appendAgentMessage(
   db: Db,
   jobs: { pushMessage(tx: Tx, messageId: string): Promise<void> },
-  input: {
-    organizationId: string;
-    conversationId: string;
-    authorUserId: string;
-    clientId: string;
-    text: string;
-    attachmentIds: string[];
-  },
+  input: AgentMessageInput,
+  hooks: AppendHooks = {},
 ): Promise<Appended> {
   const replay = await findAgentReplay(db, input);
   if (replay) return replay;
@@ -142,6 +156,7 @@ export async function appendAgentMessage(
         )
         .returning();
       if (!conversation) throw notFound("Conversation");
+      await hooks.before?.(tx, conversation);
 
       const [message] = await tx
         .insert(messages)
@@ -153,9 +168,12 @@ export async function appendAgentMessage(
           source: "dashboard",
           authorUserId: input.authorUserId,
           clientId: input.clientId,
+          kind: input.card ? input.card.type : "text",
+          card: input.card ?? null,
           text: input.text,
         })
         .returning();
+      await hooks.after?.(tx, message!, conversation);
       await linkAttachments(tx, {
         messageId: message!.id,
         deviceId: conversation.deviceId,
@@ -192,7 +210,7 @@ async function findUserReplay(db: Db, deviceId: string, clientId: string): Promi
   return row ? { ...row, created: false } : null;
 }
 
-async function findAgentReplay(
+export async function findAgentReplay(
   db: Db,
   input: { organizationId: string; conversationId: string; authorUserId: string; clientId: string },
 ): Promise<Appended | null> {

@@ -1,4 +1,5 @@
 import {
+  ActionClickInput,
   DeviceUpdateInput,
   LogoutInput,
   MessagePageQuery,
@@ -11,6 +12,7 @@ import {
   type Attachment,
   type DeviceDetails,
   type PushRegistration,
+  type ReportedPaywall,
   type SdkConversation,
   type SdkMessage,
   type UploadTicket,
@@ -20,6 +22,7 @@ import { apps, attachments, conversations, devices, type Db, type Tx } from "@hs
 import { and, count, eq, gt, isNull, ne, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import type { Deps, SdkEnv } from "../context";
+import { recordAppPaywalls, recordClick, toSdkCard } from "../cards";
 import { hashDeviceSecret, signAccessToken } from "../device-tokens";
 import { ApiError } from "../errors";
 import { nextIdentity, nextMetadata, sendingState, toSdkIdentity, verifyIdentityToken } from "../identity";
@@ -34,7 +37,8 @@ import {
   UPLOAD_URL_SECONDS,
   verifyUploads,
 } from "../photos";
-import { parseJson, parseQuery } from "../validation";
+import { publishLive } from "../realtime/events";
+import { isUuid, parseJson, parseQuery } from "../validation";
 
 const toSdkConversation = (c: ConversationRow): SdkConversation => ({
   id: c.id,
@@ -44,16 +48,23 @@ const toSdkConversation = (c: ConversationRow): SdkConversation => ({
   unread: c.unreadForUser,
 });
 
-const toSdkMessage = (m: MessageRow, attachmentsOf: Map<string, Attachment[]>): SdkMessage => ({
+const toSdkMessage = (m: MessageRow, attachmentsOf: Map<string, Attachment[]>, appStoreId: string | null): SdkMessage => ({
   id: m.id,
   seq: m.seq,
   sender: m.sender,
+  kind: m.kind,
   text: m.text,
+  card: toSdkCard(m.card, appStoreId),
+  actionClickedAt: m.actionClickedAt?.toISOString() ?? null,
   // only the device's own client IDs; a teammate's are none of its business
   clientId: m.sender === "user" ? m.clientId : null,
   attachments: attachmentsOf.get(m.id) ?? [],
   createdAt: m.createdAt.toISOString(),
 });
+
+/** Device columns for a paywall report: the whole available list, replaced. */
+const paywallColumns = (paywalls: ReportedPaywall[] | undefined) =>
+  paywalls === undefined ? {} : { availablePaywalls: paywalls, paywallsReportedAt: new Date() };
 
 /** Sending and uploading are refused the same way: blocked devices, and unverified ones where only verified users may chat. */
 function assertCanSend(device: Parameters<typeof sendingState>[0], onlyVerified: boolean) {
@@ -126,9 +137,11 @@ export function sdkRoutes(deps: Deps) {
           ...identity,
           metadata: input.metadata ? nextMetadata({}, input.metadata) : {},
           ...pushColumns(input.push),
+          ...paywallColumns(input.paywalls),
         })
         .returning();
       if (input.push) await releasePushToken(tx, app.id, input.push.token, deviceId);
+      if (input.paywalls) await recordAppPaywalls(tx, app.id, input.paywalls);
       return row;
     });
     const token = await signAccessToken(deps.deviceTokenKey, { deviceId, appId: app.id, sessionVersion: 1 });
@@ -176,7 +189,7 @@ export function sdkRoutes(deps: Deps) {
     return c.body(null, 204);
   });
 
-  /** The SDK's staged state: details, identity, metadata. All or nothing. */
+  /** The SDK's staged state: details, identity, metadata, push, paywalls. All or nothing. */
   r.patch("/device", auth, async (c) => {
     const input = await parseJson(c, DeviceUpdateInput);
     const claims = await claimsFrom(c.get("app").identitySecretEnc, input.identityToken);
@@ -190,11 +203,13 @@ export function sdkRoutes(deps: Deps) {
           ...nextIdentity(current!, input.identity, claims),
           ...(input.metadata && { metadata: nextMetadata(current!.metadata, input.metadata) }),
           ...pushColumns(input.push),
+          ...paywallColumns(input.paywalls),
           updatedAt: new Date(),
         })
         .where(eq(devices.id, current!.id))
         .returning();
       if (input.push) await releasePushToken(tx, current!.appId, input.push.token, current!.id);
+      if (input.paywalls) await recordAppPaywalls(tx, current!.appId, input.paywalls);
       return updated!;
     });
     return c.json({ identity: toSdkIdentity(device) });
@@ -230,7 +245,7 @@ export function sdkRoutes(deps: Deps) {
     return c.json({
       ...state,
       conversation: toSdkConversation(conversation),
-      messages: page.messages.map((m) => toSdkMessage(m, attachmentsOf)),
+      messages: page.messages.map((m) => toSdkMessage(m, attachmentsOf, c.get("app").appStoreId)),
       hasMore: page.hasMore,
     });
   });
@@ -308,9 +323,33 @@ export function sdkRoutes(deps: Deps) {
     );
     const attachmentsOf = await attachmentsByMessage(db, deps.storage, [result.message.id]);
     return c.json(
-      { message: toSdkMessage(result.message, attachmentsOf), conversation: toSdkConversation(result.conversation) },
+      { message: toSdkMessage(result.message, attachmentsOf, app.appStoreId), conversation: toSdkConversation(result.conversation) },
       result.created ? 201 : 200,
     );
+  });
+
+  /**
+   * A tap on a card's button: the review link or the offer's paywall. Only the first tap counts; the SDK can
+   * retry (or send a receipt it cached offline) safely.
+   */
+  r.post("/actions/:messageId/click", auth, async (c) => {
+    const input = await parseJson(c, ActionClickInput, { optional: true });
+    const messageId = c.req.param("messageId");
+    const device = c.get("device");
+    const result = isUuid(messageId)
+      ? await recordClick(db, device.id, messageId, input.clickedAt ? new Date(input.clickedAt) : undefined)
+      : null;
+    if (!result) throw new ApiError(404, "not_found", "Message not found");
+    if (result.first) {
+      await publishLive(db, {
+        type: "action",
+        organizationId: result.conversation.organizationId,
+        conversationId: result.conversation.id,
+        deviceId: device.id,
+        messageId,
+      });
+    }
+    return c.json({ actionClickedAt: result.actionClickedAt.toISOString(), first: result.first });
   });
 
   r.post("/read", auth, async (c) => {

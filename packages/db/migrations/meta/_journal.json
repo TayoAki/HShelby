@@ -50,6 +50,13 @@
       "when": 1793229203439,
       "tag": "0006_realtime",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1793231388707,
+      "tag": "0007_cards",
+      "breakpoints": true
     }
   ]
 }

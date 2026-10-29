@@ -55,6 +55,8 @@ function teamEvent(event: LiveEvent, client: TeamClient): TeamLiveEvent | null {
         : { type: "typing", conversationId: event.conversationId, sender: event.sender, name: event.name, userId: event.userId };
     case "presence":
       return { type: "presence", conversationId: event.conversationId, inChat: event.inChat };
+    case "action":
+      return { type: "action", conversationId: event.conversationId, messageId: event.messageId };
   }
 }
 

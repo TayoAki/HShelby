@@ -62,6 +62,7 @@ export async function authenticateDevice(deps: Deps, authorization: string | und
         organizationId: apps.organizationId,
         onlyVerified: apps.onlyVerified,
         identitySecretEnc: apps.identitySecretEnc,
+        appStoreId: apps.appStoreId,
       },
     })
     .from(devices)

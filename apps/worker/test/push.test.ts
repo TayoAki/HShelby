@@ -23,6 +23,14 @@ describe("push.send", () => {
     expect((await s.device()).pushIssue).toBeNull();
   });
 
+  it("describes a card that has no text", async () => {
+    const card = { type: "paywall", paywallId: "pro", paywallTitle: "Pro yearly", buttonLabel: null } as const;
+    const s = await scenario({ reply: { kind: "paywall", card, text: "" } });
+    await deliverMessagePush(deps, s.replyId, once);
+    const { payload } = production.requests.find((r) => r.deviceToken === s.token)!;
+    expect(payload).toMatchObject({ aps: { alert: { body: "Ada: Sent an offer: Pro yearly" } } });
+  });
+
   it("leaves the badge to apps that own it", async () => {
     const s = await scenario({ device: { updatesAppBadge: false, pushEnv: "sandbox" } });
     await deliverMessagePush(deps, s.replyId, once);

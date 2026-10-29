@@ -33,6 +33,10 @@ export const errorCodes = [
   "subscription_inactive",
   "plan_unavailable",
   "already_subscribed",
+  "paywall_unavailable",
+  "app_store_id_required",
+  "card_repeat_unconfirmed",
+  "not_a_card",
   "internal_error",
 ] as const;
 export type ErrorCode = (typeof errorCodes)[number];
@@ -79,9 +83,13 @@ export const CreateAppInput = z.union([
 ]);
 export type CreateAppInput = z.infer<typeof CreateAppInput>;
 
-/** Name for any member; onlyVerified for owners and admins. */
+/** Name for any member; onlyVerified and the App Store ID (where review cards lead) for owners and admins. */
 export const UpdateAppInput = z
-  .object({ name: z.string().trim().min(1).max(100), onlyVerified: z.boolean() })
+  .object({
+    name: z.string().trim().min(1).max(100),
+    onlyVerified: z.boolean(),
+    appStoreId: z.string().regex(/^\d{5,12}$/, "the numeric App Store ID").nullable(),
+  })
   .partial()
   .strict()
   .refine((v) => Object.keys(v).length > 0, { message: "nothing to update" });
@@ -110,6 +118,7 @@ export const AppStoreSearch = z.object({ results: z.array(AppStoreResult) });
 export type AppStoreSearch = z.infer<typeof AppStoreSearch>;
 
 export * from "./billing";
+export * from "./cards";
 export * from "./identity";
 export * from "./messaging";
 export * from "./photos";

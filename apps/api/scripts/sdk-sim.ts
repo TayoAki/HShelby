@@ -13,6 +13,8 @@
  * --photo PATH      send a JPEG or PNG through the upload flow (repeatable, up to 4; --caption adds text)
  * --push-token HEX  report an APNs device token (with --push-env sandbox|production, default sandbox),
  *                   so "Send test" and replies target this device
+ * --paywall ID=TITLE  report a paywall the app can show (repeatable; replaces the list), so the team can send
+ *                   offers for it. In --chat, type /tap to tap the latest card's button.
  * --logout          logout(): end this device; the next run registers a new one
  * --delete          deleteData(): remove this device and its history
  * --new-device      start over as a new install
@@ -57,12 +59,15 @@ const { values: args } = parseArgs({
     caption: { type: "string", default: "" },
     "push-token": { type: "string" },
     "push-env": { type: "string", default: "sandbox" },
+    paywall: { type: "string", multiple: true },
     logout: { type: "boolean", default: false },
     delete: { type: "boolean", default: false },
   },
 });
 if (!args.app) {
-  console.error("Usage: sdk-sim.ts --app app_… [--api URL] [--say TEXT]… [--chat] [--user-id ID --name N --email E [--verified]] [--meta K=V]… [--logout | --delete] [--new-device]");
+  console.error(
+    "Usage: sdk-sim.ts --app app_… [--api URL] [--say TEXT]… [--chat] [--user-id ID --name N --email E [--verified]] [--meta K=V]… [--paywall ID=TITLE]… [--logout | --delete] [--new-device]",
+  );
   process.exit(1);
 }
 const api = args.api.replace(/\/$/, "");
@@ -102,11 +107,16 @@ async function stagedState() {
   }
   const metadata = args.meta && Object.fromEntries(args.meta.map((kv) => [kv.slice(0, kv.indexOf("=")), kv.slice(kv.indexOf("=") + 1)]));
   const pushToken = args["push-token"];
+  const paywalls = args.paywall?.map((kv) => {
+    const [id, title] = kv.includes("=") ? [kv.slice(0, kv.indexOf("=")), kv.slice(kv.indexOf("=") + 1)] : [kv, kv];
+    return { id, title, source: "app" };
+  });
   return {
     ...(hasLabels && { identity: labels }),
     ...(identityToken && { identityToken }),
     ...(metadata && { metadata }),
     ...(pushToken && { push: { token: pushToken, environment: args["push-env"] } }),
+    ...(paywalls && { paywalls }),
   };
 }
 
@@ -149,10 +159,31 @@ async function refresh() {
   }
 }
 
+/** The latest card, for /tap. */
+let lastCard: SdkMessage | null = null;
+
+const cardButton = (m: SdkMessage) => {
+  if (!m.card) return "";
+  const card = m.card;
+  if (card.type === "review") return card.url ? `[★ ${card.buttonLabel ?? "Rate on the App Store"}]` : "";
+  const known = !args.paywall || args.paywall.some((kv) => kv.split("=")[0] === card.paywallId);
+  return known ? `[${card.buttonLabel ?? "View offer"} → ${card.paywallId}]` : "[No longer available]";
+};
+
 const print = (m: SdkMessage) => {
   const photos = m.attachments.map((a) => `[photo ${a.width}×${a.height}]`).join(" ");
-  console.log(`${m.sender === "user" ? "  you" : " team"} │ ${[photos, m.text].filter(Boolean).join(" ")}`);
+  if (m.card) lastCard = m;
+  const tapped = m.actionClickedAt ? "(tapped)" : "";
+  console.log(`${m.sender === "user" ? "  you" : " team"} │ ${[photos, m.text, cardButton(m), tapped].filter(Boolean).join(" ")}`);
 };
+
+/** What the SDK does on a card tap: open the review page or the paywall, and send the click receipt. */
+async function tapLastCard() {
+  if (!lastCard?.card) return console.log("       (no card to tap)");
+  const target = lastCard.card.type === "review" ? lastCard.card.url : `paywall ${lastCard.card.paywallId}`;
+  const { first } = await request<{ first: boolean }>(`/v1/actions/${lastCard.id}/click`, { method: "POST" });
+  console.log(`       (opened ${target}${first ? "" : "; already tapped before"})`);
+}
 
 /** The SDK's photo flow: an upload ticket for the exact bytes, a PUT straight to storage, then the message. */
 async function sendPhotos(paths: string[], caption: string) {
@@ -291,6 +322,7 @@ if (args.chat) {
   }
   createInterface({ input: process.stdin }).on("line", (line) => {
     const text = line.trim();
-    if (text) send(text).catch((err: unknown) => console.error(String(err)));
+    if (text === "/tap") tapLastCard().catch((err: unknown) => console.error(String(err)));
+    else if (text) send(text).catch((err: unknown) => console.error(String(err)));
   });
 }

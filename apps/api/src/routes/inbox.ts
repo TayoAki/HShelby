@@ -2,7 +2,9 @@ import {
   InboxListQuery,
   isInChat,
   MessagePageQuery,
+  messagePreview,
   ReadInput,
+  SendCardInput,
   SendMessageInput,
   type Attachment,
   type InboxConversation,
@@ -15,7 +17,8 @@ import { and, desc, eq, ilike, inArray, isNull, or, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import type { AppEnv, Deps } from "../context";
 import { ApiError, notFound } from "../errors";
-import { appendAgentMessage, markTeamRead, pageMessages, type ConversationRow, type PagedMessage } from "../messaging";
+import { guardRepeat, markReviewAsked, prepareCard, toInboxCard } from "../cards";
+import { appendAgentMessage, findAgentReplay, markTeamRead, pageMessages, type ConversationRow, type PagedMessage } from "../messaging";
 import { requireOrgAdmin } from "../middleware";
 import { publishLive } from "../realtime/events";
 import {
@@ -57,17 +60,23 @@ const toInboxDevice = (d: DeviceRow): InboxDevice => ({
   },
   inChat: isInChat(d),
   lastSeenInChatAt: d.lastSeenInChatAt?.toISOString() ?? null,
+  paywalls: d.availablePaywalls,
+  paywallsReportedAt: d.paywallsReportedAt?.toISOString() ?? null,
+  reviewAskedAt: d.reviewAskedAt?.toISOString() ?? null,
 });
 
 /** ILIKE pattern for a literal substring. */
 const contains = (q: string) => `%${q.replace(/[\\%_]/g, "\\$&")}%`;
 
-const toInboxMessage = (m: PagedMessage, attachmentsOf: Map<string, Attachment[]>): InboxMessage => ({
+const toInboxMessage = (m: PagedMessage, attachmentsOf: Map<string, Attachment[]>, appStoreId: string | null): InboxMessage => ({
   id: m.id,
   seq: m.seq,
   sender: m.sender,
   source: m.source,
+  kind: m.kind,
   text: m.text,
+  card: toInboxCard(m.card, appStoreId),
+  actionClickedAt: m.actionClickedAt?.toISOString() ?? null,
   clientId: m.sender === "agent" ? m.clientId : null,
   attachments: attachmentsOf.get(m.id) ?? [],
   createdAt: m.createdAt.toISOString(),
@@ -98,7 +107,10 @@ export function conversationRoutes(deps: Deps) {
         device: devices,
         lastSender: messages.sender,
         lastText: messages.text,
+        lastKind: messages.kind,
+        lastCard: messages.card,
         setupConversationId: apps.setupConversationId,
+        appStoreId: apps.appStoreId,
       })
       .from(conversations)
       .innerJoin(apps, and(eq(apps.id, conversations.appId), isNull(apps.deletedAt)))
@@ -115,8 +127,11 @@ export function conversationRoutes(deps: Deps) {
     lastSeq: row.conversation.lastSeq,
     unreadForTeam: row.conversation.unreadForTeam,
     lastMessageAt: row.conversation.lastMessageAt.toISOString(),
-    // a photo-only message has no text to preview
-    lastMessage: row.lastSender && row.lastText !== null ? { sender: row.lastSender, text: row.lastText || "Photo" } : null,
+    // photo-only messages and cards may have no text to preview
+    lastMessage:
+      row.lastSender && row.lastText !== null && row.lastKind
+        ? { sender: row.lastSender, text: messagePreview({ text: row.lastText, kind: row.lastKind, card: row.lastCard }) }
+        : null,
     setup: row.setupConversationId === row.conversation.id,
   });
 
@@ -170,7 +185,10 @@ export function conversationRoutes(deps: Deps) {
     const row = await findConversation(c.get("org").id, c.req.param("id"));
     const page = await pageMessages(db, row.conversation.id, query);
     const attachmentsOf = await attachmentsByMessage(db, deps.storage, page.messages.map((m) => m.id));
-    return c.json({ messages: page.messages.map((m) => toInboxMessage(m, attachmentsOf)), hasMore: page.hasMore });
+    return c.json({
+      messages: page.messages.map((m) => toInboxMessage(m, attachmentsOf, row.appStoreId)),
+      hasMore: page.hasMore,
+    });
   });
 
   /**
@@ -227,8 +245,41 @@ export function conversationRoutes(deps: Deps) {
       attachmentIds: input.attachmentIds,
     });
     const attachmentsOf = await attachmentsByMessage(db, deps.storage, [result.message.id]);
+    const [app] = await db.select({ appStoreId: apps.appStoreId }).from(apps).where(eq(apps.id, result.conversation.appId));
     return c.json(
-      { message: toInboxMessage({ ...result.message, authorName: user.name }, attachmentsOf) },
+      { message: toInboxMessage({ ...result.message, authorName: user.name }, attachmentsOf, app?.appStoreId ?? null) },
+      result.created ? 201 : 200,
+    );
+  });
+
+  /**
+   * A review request or an offer. An offer must name a paywall the device reported as available; if the last card
+   * of the kind got no reply, the teammate confirms the repeat. 201 for a new card, 200 for a resent clientId.
+   */
+  r.post("/:id/cards", async (c) => {
+    const input = await parseJson(c, SendCardInput);
+    const org = c.get("org");
+    const user = c.get("user");
+    const row = await findConversation(org.id, c.req.param("id"));
+    // a resent card returns the stored one, even if the paywall has gone since
+    const replay = await findAgentReplay(db, { organizationId: org.id, conversationId: row.conversation.id, authorUserId: user.id, clientId: input.clientId });
+    if (replay) return c.json({ message: toInboxMessage({ ...replay.message, authorName: user.name }, new Map(), row.appStoreId) });
+    await deps.billing.requireCanReply(org.id, row.conversation.id);
+    const [app] = await db.select({ name: apps.name }).from(apps).where(eq(apps.id, row.conversation.appId));
+    const { text, card } = prepareCard(input, { name: app!.name, appStoreId: row.appStoreId }, row.device);
+    const result = await appendAgentMessage(
+      db,
+      deps.jobs,
+      { organizationId: org.id, conversationId: row.conversation.id, authorUserId: user.id, clientId: input.clientId, text, attachmentIds: [], card },
+      {
+        before: (tx, conversation) => guardRepeat(tx, conversation, input.kind, input.confirmRepeat),
+        after: async (tx, _message, conversation) => {
+          if (card.type === "review") await markReviewAsked(tx, conversation.deviceId);
+        },
+      },
+    );
+    return c.json(
+      { message: toInboxMessage({ ...result.message, authorName: user.name }, new Map(), row.appStoreId) },
       result.created ? 201 : 200,
     );
   });

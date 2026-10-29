@@ -1,3 +1,4 @@
+import type { ReportedPaywall, StoredCard } from "@hshelby/contracts";
 import { sql } from "drizzle-orm";
 import { bigint, boolean, index, integer, jsonb, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 import { apps } from "./apps";
@@ -55,6 +56,11 @@ export const devices = pgTable(
      */
     chatOpen: boolean("chat_open").notNull().default(false),
     lastSeenInChatAt: ts("last_seen_in_chat_at"),
+    /** The paywalls the app last reported it can show (phase B7), replaced whole on every report. */
+    availablePaywalls: jsonb("available_paywalls").$type<ReportedPaywall[]>().notNull().default([]),
+    paywallsReportedAt: ts("paywalls_reported_at"),
+    /** The last review card sent to this device: automations skip devices already asked. */
+    reviewAskedAt: ts("review_asked_at"),
     /** logout(): the credential is dead and the history stays; the app registers a new device next. */
     signedOutAt: ts("signed_out_at"),
     createdAt: ts("created_at").notNull().defaultNow(),
@@ -125,12 +131,18 @@ export const messages = pgTable(
     deviceId: uuid("device_id").references(() => devices.id, { onDelete: "cascade" }),
     /** Chosen by the sender per message; a retried send reuses it and gets the stored message back. */
     clientId: text("client_id"),
-    kind: text("kind", { enum: ["text"] }).notNull().default("text"),
+    kind: text("kind", { enum: ["text", "review", "paywall"] }).notNull().default("text"),
     text: text("text").notNull(),
+    /** Review and offer messages: what the button does (phase B7). */
+    card: jsonb("card").$type<StoredCard>(),
+    /** The first tap on the card's button; later taps don't move it. */
+    actionClickedAt: ts("action_clicked_at"),
     createdAt: ts("created_at").notNull().defaultNow(),
   },
   (t) => [
     uniqueIndex("messages_conversation_seq_uq").on(t.conversationId, t.seq),
+    // card stats over the last 7–90 days
+    index("messages_cards_idx").on(t.createdAt).where(sql`${t.kind} <> 'text'`),
     uniqueIndex("messages_device_client_uq").on(t.deviceId, t.clientId),
     uniqueIndex("messages_author_client_uq").on(t.authorUserId, t.clientId),
   ],

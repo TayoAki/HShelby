@@ -9,7 +9,7 @@ import {
   type InboxMessage,
   type InboxThread,
 } from "@hshelby/contracts";
-import { ArrowLeftIcon, ArrowUpIcon, ImageIcon } from "@radix-ui/react-icons";
+import { ArrowLeftIcon, ArrowUpIcon, ImageIcon, StarIcon, TokensIcon } from "@radix-ui/react-icons";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
@@ -22,6 +22,7 @@ import { preparePhoto } from "@/lib/photos";
 import { clockTime, dayLabel, localTimeIn, relativeTime, sameDay } from "@/lib/time";
 import { isAdmin, useMe } from "@/lib/use-me";
 import { useVisibleInterval } from "@/lib/use-visible-interval";
+import { CardBubble, CardDialog } from "./Cards";
 import { IdentityBadge } from "./Identity";
 import { deviceLabel, useInbox } from "./InboxContext";
 import { MessagePhotos, PhotoViewer, StagedPhotos, type StagedPhoto } from "./Photos";
@@ -30,6 +31,9 @@ import { MessagePhotos, PhotoViewer, StagedPhotos, type StagedPhoto } from "./Ph
 type Item = InboxMessage & { state?: "sending" | "failed" };
 
 const GROUP_GAP_MS = 5 * 60_000;
+
+const toolbarButton =
+  "flex h-8 items-center gap-1.5 rounded-full bg-panel px-3 text-[13px] text-secondary transition-colors hover:bg-[var(--panel-hover)] hover:text-fg";
 
 /** Stored messages by seq, then pending sends; a pending send disappears once its clientId is stored. */
 function merge(current: Item[], incoming: InboxMessage[]): Item[] {
@@ -94,6 +98,7 @@ export function Thread({ conversationId }: { conversationId: string }) {
   /** Who's typing in this conversation right now: the user, or another teammate. */
   const [typing, setTyping] = useState<{ label: string; until: number } | null>(null);
   const lastTypingSent = useRef(0);
+  const [cardDialog, setCardDialog] = useState<"review" | "paywall" | null>(null);
 
   const lastSeq = useMemo(() => items.reduce((max, m) => (m.state ? max : Math.max(max, m.seq)), 0), [items]);
   const base = `/conversations/${conversationId}`;
@@ -137,6 +142,11 @@ export function Thread({ conversationId }: { conversationId: string }) {
       catchUp();
     } else if (event.type === "conversation") {
       void reloadConversation();
+    } else if (event.type === "action") {
+      // a card was tapped: its receipt is on a message we already have, so reload the latest page
+      api<InboxThread>(`${base}/messages?limit=50`)
+        .then((t) => setItems((current) => merge(current, t.messages)))
+        .catch(() => {});
     } else if (event.type === "presence") {
       setConversation((c) =>
         c && { ...c, device: { ...c.device, inChat: event.inChat, lastSeenInChatAt: new Date().toISOString() } },
@@ -187,7 +197,10 @@ export function Thread({ conversationId }: { conversationId: string }) {
       seq: Number.MAX_SAFE_INTEGER,
       sender: "agent",
       source: "dashboard",
+      kind: "text",
       text,
+      card: null,
+      actionClickedAt: null,
       clientId,
       attachments: photos,
       createdAt: new Date().toISOString(),
@@ -391,7 +404,11 @@ export function Thread({ conversationId }: { conversationId: string }) {
                     <MessagePhotos attachments={m.attachments} align={agent ? "end" : "start"} onOpen={setViewing} />
                   </div>
                 )}
-                {m.text && (
+                {m.card ? (
+                  <div className="mt-1 flex justify-end">
+                    <CardBubble message={m} who={deviceLabel(device)} pending={Boolean(m.state)} />
+                  </div>
+                ) : m.text && (
                   <div className={`mt-1 flex ${agent ? "justify-end" : "justify-start"}`}>
                     <p
                       className={`max-w-[75%] whitespace-pre-wrap break-words rounded-[20px] px-4 py-2.5 text-[15px] leading-[1.4] ${
@@ -461,6 +478,14 @@ export function Thread({ conversationId }: { conversationId: string }) {
             {unsubscribed && (
               <p className="mb-2 px-3 text-[12px] text-muted">This is your app&apos;s setup conversation: you can reply here before subscribing.</p>
             )}
+            <div className="mb-2 flex gap-2">
+              <button type="button" onClick={() => setCardDialog("review")} className={toolbarButton}>
+                <StarIcon /> Ask for review
+              </button>
+              <button type="button" onClick={() => setCardDialog("paywall")} className={toolbarButton}>
+                <TokensIcon /> Send offer
+              </button>
+            </div>
             <StagedPhotos photos={staged} onRemove={unstage} />
             <div className="flex items-end gap-2 rounded-[24px] border border-[var(--field)] bg-white p-1.5 transition-colors focus-within:border-fg/60">
               <input
@@ -510,6 +535,20 @@ export function Thread({ conversationId }: { conversationId: string }) {
       </section>
 
       {viewing && <PhotoViewer attachment={viewing} onClose={() => setViewing(null)} />}
+      {cardDialog && (
+        <CardDialog
+          kind={cardDialog}
+          conversation={conversation}
+          onClose={() => setCardDialog(null)}
+          onSent={(message) => {
+            stickToBottom.current = true;
+            setItems((current) => merge(current, [message]));
+            setConversation((c) => c && { ...c, lastSeq: Math.max(c.lastSeq, message.seq), unreadForTeam: 0 });
+            void reloadConversation();
+            refresh();
+          }}
+        />
+      )}
       <aside className="hidden w-[280px] shrink-0 overflow-y-auto border-l border-line px-5 py-4 xl:block">
         <DetailsSection title="User">
           <Detail label="Name" value={device.name} />
@@ -555,6 +594,13 @@ export function Thread({ conversationId }: { conversationId: string }) {
             value={device.push.enabled ? (device.push.environment === "sandbox" ? "On · Sandbox" : "On · Production") : "Off"}
           />
           {device.push.issue && <Detail label="Push issue" value={device.push.issue} />}
+        </DetailsSection>
+        <DetailsSection title="Offers and reviews">
+          <Detail
+            label="Paywalls"
+            value={device.paywallsReportedAt ? `${device.paywalls.length} available` : "Not reported"}
+          />
+          <Detail label="Review asked" value={device.reviewAskedAt ? relativeTime(device.reviewAskedAt) : "Never"} />
         </DetailsSection>
         <div className="flex flex-col items-start gap-2">
           <button

@@ -16,7 +16,15 @@ export async function pushFixture() {
   const apns = createApnsClient({ hosts: { sandbox: sandbox.url, production: production.url } });
 
   /** An app with push set up, a device with a token, and one teammate reply waiting to be pushed. */
-  async function scenario(options: { p8?: string; push?: boolean; device?: Partial<typeof devices.$inferInsert>; unread?: number } = {}) {
+  async function scenario(
+    options: {
+      p8?: string;
+      push?: boolean;
+      device?: Partial<typeof devices.$inferInsert>;
+      unread?: number;
+      reply?: Partial<typeof messages.$inferInsert>;
+    } = {},
+  ) {
     const organizationId = uuidv7();
     const appId = uuidv7();
     const deviceId = uuidv7();
@@ -62,7 +70,7 @@ export async function pushFixture() {
     const replyId = uuidv7();
     await db.insert(messages).values([
       { id: userMessageId, conversationId, seq: 1, sender: "user", source: "sdk", deviceId, text: "My lists won't sync" },
-      { id: replyId, conversationId, seq: 2, sender: "agent", source: "dashboard", authorUserId: authorId, text: "Try pulling to refresh" },
+      { id: replyId, conversationId, seq: 2, sender: "agent", source: "dashboard", authorUserId: authorId, text: "Try pulling to refresh", ...options.reply },
     ]);
     const device = async () => (await db.select().from(devices).where(eq(devices.id, deviceId)))[0]!;
     const config = async () => (await db.select().from(pushConfigs).where(eq(pushConfigs.appId, appId)))[0];

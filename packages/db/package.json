@@ -3,6 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "dependencies": {
+    "@hshelby/contracts": "*"
+  },
   "devDependencies": {
     "@types/node": "^22.20.5",
     "@types/pg": "^8.23.1",

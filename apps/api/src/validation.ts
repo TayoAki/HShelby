@@ -2,10 +2,12 @@ import type { Context } from "hono";
 import type { z } from "zod";
 import { ApiError } from "./errors";
 
-export async function parseJson<T extends z.ZodType>(c: Context, schema: T): Promise<z.infer<T>> {
+/** Parses and validates a JSON body. With `optional`, an empty body counts as `{}`. */
+export async function parseJson<T extends z.ZodType>(c: Context, schema: T, options: { optional?: boolean } = {}): Promise<z.infer<T>> {
   let body: unknown;
   try {
-    body = await c.req.json();
+    const text = await c.req.text();
+    body = options.optional && text.trim() === "" ? {} : JSON.parse(text);
   } catch {
     throw new ApiError(400, "validation_failed", "Request body must be JSON");
   }

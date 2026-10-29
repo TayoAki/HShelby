@@ -21,7 +21,9 @@ export type LiveEvent =
       name: string | null;
       userId: string | null;
     }
-  | { type: "presence"; organizationId: string; conversationId: string; deviceId: string; inChat: boolean };
+  | { type: "presence"; organizationId: string; conversationId: string; deviceId: string; inChat: boolean }
+  /** The first tap on a card's button (phase B7). */
+  | { type: "action"; organizationId: string; conversationId: string; deviceId: string; messageId: string };
 
 /** Publishes an event. Inside a transaction it goes out on commit, so a rolled-back change is never announced. */
 export async function publishLive(db: Db | Tx, event: LiveEvent) {
