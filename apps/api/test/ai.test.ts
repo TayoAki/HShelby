@@ -3,13 +3,15 @@ import Anthropic from "@anthropic-ai/sdk";
 import { aiRuns, apps, auditEvents, conversations, devices } from "@hshelby/db";
 import { and, eq, sql } from "drizzle-orm";
 import { afterAll, describe, expect, it } from "vitest";
+import { runTurn, type Executor } from "../src/ai/assistant";
 import { considerMessage } from "../src/ai/consider";
+import { aiProvider, aiProviderFromEnv } from "../src/ai/provider";
 import { AI_CONSIDER_QUEUE, type AiConsiderJob } from "../src/jobs";
 import { lastToolResults, refusal, say, startFakeAnthropic, toolUse } from "./fake-anthropic";
 import { joinAsMember, makeTestApp, registerDevice, reply, workspaceWithApp } from "./helpers";
 
 const fake = await startFakeAnthropic();
-const { app, deps, close } = await makeTestApp({ anthropic: new Anthropic({ apiKey: "test-key", baseURL: fake.url, maxRetries: 0 }) });
+const { app, deps, close } = await makeTestApp({ ai: aiProvider("anthropic", new Anthropic({ apiKey: "test-key", baseURL: fake.url, maxRetries: 0 })) });
 afterAll(async () => {
   await close();
   await fake.close();
@@ -344,5 +346,47 @@ describe("preview", () => {
 
     const member = await joinAsMember(app, deps, team.call);
     expect((await member.call(`/api/apps/${team.appId}/ai/preview`, { method: "POST", body: JSON.stringify({ messages: [{ sender: "user", text: "hi" }] }) })).status).toBe(403);
+  });
+});
+
+describe("through OpenRouter", () => {
+  it("takes the Anthropic key first, then OpenRouter's, and AI_MODEL overrides the model", () => {
+    const base = { ANTHROPIC_BASE_URL: undefined, OPENROUTER_BASE_URL: "https://openrouter.ai/api", AI_MODEL: undefined };
+    expect(aiProviderFromEnv({ ...base, ANTHROPIC_API_KEY: undefined, OPENROUTER_API_KEY: undefined })).toBeNull();
+    expect(aiProviderFromEnv({ ...base, ANTHROPIC_API_KEY: "sk-ant", OPENROUTER_API_KEY: "sk-or" })).toMatchObject({ name: "anthropic", model: "claude-opus-5-5", serverFallback: true });
+    expect(aiProviderFromEnv({ ...base, ANTHROPIC_API_KEY: undefined, OPENROUTER_API_KEY: "sk-or" })).toMatchObject({ name: "openrouter", model: "anthropic/claude-opus-5.5", serverFallback: false });
+    expect(aiProviderFromEnv({ ...base, ANTHROPIC_API_KEY: undefined, OPENROUTER_API_KEY: "sk-or", AI_MODEL: "anthropic/claude-sonnet-5.5" })?.model).toBe("anthropic/claude-sonnet-5.5");
+  });
+
+  it("sends the key as a bearer token, names OpenRouter's model and leaves out the server-side fallback", async () => {
+    const ai = aiProviderFromEnv({
+      ANTHROPIC_API_KEY: undefined,
+      ANTHROPIC_BASE_URL: undefined,
+      OPENROUTER_API_KEY: "sk-or-test",
+      OPENROUTER_BASE_URL: fake.url,
+      AI_MODEL: undefined,
+    })!;
+    const sent: string[] = [];
+    const executor: Executor = { reply: async (text) => void sent.push(text), offer: async () => {}, review: async () => {}, handover: async () => {} };
+    const before = fake.requests.length;
+    fake.respond(() => toolUse("reply", { text: "Settings → Restore purchases." }));
+    const result = await runTurn(
+      ai,
+      { system: [{ type: "text", text: "You answer support chats." }], prompt: "How do I restore?", allowOffers: false, allowReviews: false, offers: [], reviewUnavailable: "off" },
+      executor,
+    );
+    expect(sent).toEqual(["Settings → Restore purchases."]);
+    expect(result).toMatchObject({ refused: false, fallback: false, actions: [{ type: "reply" }] });
+
+    const [request] = fake.requests.slice(before);
+    expect(request!.headers.authorization).toBe("Bearer sk-or-test");
+    expect(request!.headers["x-api-key"]).toBeUndefined();
+    expect(String(request!.headers["anthropic-beta"] ?? "")).not.toContain("server-side-fallback");
+    expect(request!.body).toMatchObject({ model: "anthropic/claude-opus-5.5", output_config: { effort: "low" } });
+    expect(request!.body.fallbacks).toBeUndefined();
+    expect(request!.body.tools.map((t: any) => [t.name, t.strict])).toEqual([
+      ["reply", true],
+      ["handover", true],
+    ]);
   });
 });

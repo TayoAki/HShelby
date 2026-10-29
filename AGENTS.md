@@ -4,7 +4,7 @@ npm-workspaces monorepo. Node 22.
 
 | Path | What |
 |---|---|
-| `apps/api` | Hono API: Better Auth at `/api/auth/*`, org-scoped `/api/*`, SDK `/v1/*`, webhooks `/webhooks/*` (Telegram, subscription providers), automation and AI-reply jobs (`ai.consider`, Claude via `@anthropic-ai/sdk`; tests use the fake in `test/fake-anthropic.ts`), live WebSockets at `/api/live` and `/v1/live` (fan-out with Postgres LISTEN/NOTIFY). `src/server.ts` starts HTTP and the gateway together. Tests hit a real Postgres. |
+| `apps/api` | Hono API: Better Auth at `/api/auth/*`, org-scoped `/api/*`, SDK `/v1/*`, webhooks `/webhooks/*` (Telegram, subscription providers), automation and AI-reply jobs (`ai.consider`, Claude via `@anthropic-ai/sdk`, directly or through OpenRouter, see `src/ai/provider.ts`; tests use the fake in `test/fake-anthropic.ts`), live WebSockets at `/api/live` and `/v1/live` (fan-out with Postgres LISTEN/NOTIFY). `src/server.ts` starts HTTP and the gateway together. Tests hit a real Postgres. |
 | `apps/worker` | pg-boss jobs: `push.send`, `team.notify` → `telegram.send`, nightly cleanup, deleted-app purge, hourly unsent-upload sweep, hourly `billing.sync`. Needs `DATABASE_URL` and `ENC_KEYS`; `S3_*` for photos, `STRIPE_SECRET_KEY` for the billing sync. |
 | `apps/dashboard` | Next.js dashboard. Proxies `/api/*` to the API (`API_INTERNAL_URL`), so auth cookies stay first-party. |
 | `apps/web` | Landing-page study clone. Not deployed (it carries another company's brand). |
@@ -22,7 +22,7 @@ npm-workspaces monorepo. Node 22.
 - Local S3 for photo tests: `TEST_S3_ENDPOINT` (default `http://127.0.0.1:5070`); run `pip install "moto[server]" && moto_server -p 5070`.
 - Checks before pushing: `npm run typecheck && npm run lint && npm test && npm run build`.
 - Railway redeploys a service only when its watch patterns match the change. When an app gains a workspace dependency, add that package's path to the service's watch patterns (see `docs/BACKEND_PLAN.md` Status).
-- AI replies eval (real model, needs `ANTHROPIC_API_KEY`): `npm run eval -w @hshelby/api`. Not part of `npm test`.
+- AI replies eval (real model, needs `ANTHROPIC_API_KEY` or `OPENROUTER_API_KEY`): `npm run eval -w @hshelby/api`. Not part of `npm test`.
 - Plan and phases: `docs/BACKEND_PLAN.md`. Stripe runs in test mode only; the API refuses `sk_live_` keys.
 - Restores, the monthly restore drill and the load test: `docs/RUNBOOK.md`. The API's rate limits scale with `RATE_LIMIT_SCALE` (tests set `0`); a load test from one machine needs it raised on the api.
 

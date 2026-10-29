@@ -3,14 +3,16 @@
  *
  *   ANTHROPIC_API_KEY=… npm run eval -w @hshelby/api [-- --bar 0.9 --only refund --cases eval/cases.<app>.json]
  *
+ * OPENROUTER_API_KEY instead runs it through OpenRouter, and AI_MODEL picks another model (see src/ai/provider.ts).
+ *
  * Nothing is sent to anyone: the tools only record what the model chose. Each case is one model call (two
  * when a guardrail refuses the first choice). Exits 1 when the pass rate is under the bar.
  */
 import { readFileSync } from "node:fs";
 import { parseArgs } from "node:util";
-import Anthropic from "@anthropic-ai/sdk";
 import type { AiAction, AiUsage, ReportedPaywall } from "@hshelby/contracts";
-import { AI_MODEL, runTurn, type Executor } from "../src/ai/assistant";
+import { runTurn, type Executor } from "../src/ai/assistant";
+import { aiProviderFromEnv, type AiProvider } from "../src/ai/provider";
 import { offersFor, reviewUnavailable, systemPrompt, turnPrompt, type PersonFacts, type TranscriptMessage } from "../src/ai/prompt";
 import { CASES, EVAL_APP, type EvalCase, type Outcome } from "./cases";
 
@@ -23,7 +25,7 @@ const { values: args } = parseArgs({
   },
 });
 
-/** Claude Opus 5.5 list prices per million tokens; cache writes at the 5-minute rate. */
+/** Claude Opus 5.5 list prices per million tokens (the same through OpenRouter); cache writes at the 5-minute rate. */
 const PRICE = { input: 4, output: 20, cacheRead: 0.2, cacheWrite: 5 };
 const dryRun: Executor = { reply: async () => {}, offer: async () => {}, review: async () => {}, handover: async () => {} };
 
@@ -54,7 +56,7 @@ function grade(c: EvalCase, actions: AiAction[]) {
   return problems;
 }
 
-async function runCase(client: Anthropic, c: EvalCase) {
+async function runCase(ai: AiProvider, c: EvalCase) {
   const settings = {
     name: "Assistant",
     instructions: c.settings?.instructions ?? EVAL_APP.instructions,
@@ -94,7 +96,7 @@ async function runCase(client: Anthropic, c: EvalCase) {
   }));
   const started = Date.now();
   const result = await runTurn(
-    client,
+    ai,
     {
       system: systemPrompt(EVAL_APP.name, settings),
       prompt: turnPrompt(app, settings, person, transcript),
@@ -109,14 +111,24 @@ async function runCase(client: Anthropic, c: EvalCase) {
 }
 
 async function main() {
-  if (!process.env.ANTHROPIC_API_KEY) {
-    console.error("Set ANTHROPIC_API_KEY to run the eval (it calls the real model).");
+  const env = process.env;
+  const ai = aiProviderFromEnv(
+    {
+      ANTHROPIC_API_KEY: env.ANTHROPIC_API_KEY,
+      ANTHROPIC_BASE_URL: env.ANTHROPIC_BASE_URL,
+      OPENROUTER_API_KEY: env.OPENROUTER_API_KEY,
+      OPENROUTER_BASE_URL: env.OPENROUTER_BASE_URL ?? "https://openrouter.ai/api",
+      AI_MODEL: env.AI_MODEL,
+    },
+    { maxRetries: 4 },
+  );
+  if (!ai) {
+    console.error("Set ANTHROPIC_API_KEY or OPENROUTER_API_KEY to run the eval (it calls the real model).");
     process.exit(2);
   }
   const all: EvalCase[] = args.cases ? JSON.parse(readFileSync(args.cases, "utf8")) : CASES;
   const cases = all.filter((c) => !args.only || c.name.includes(args.only));
-  const client = new Anthropic({ maxRetries: 4 });
-  console.log(`${cases.length} cases on ${AI_MODEL}\n`);
+  console.log(`${cases.length} cases on ${ai.model} (${ai.name})\n`);
 
   const total: AiUsage = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 };
   let passed = 0;
@@ -131,7 +143,7 @@ async function main() {
     Array.from({ length: Number(args.concurrency) }, async () => {
       for (let c = queue.shift(); c; c = queue.shift()) {
         try {
-          const r = await runCase(client, c);
+          const r = await runCase(ai, c);
           for (const k of Object.keys(total) as (keyof AiUsage)[]) total[k] += r.usage[k];
           latencies.push(r.latencyMs);
           if (r.refused) refused++;

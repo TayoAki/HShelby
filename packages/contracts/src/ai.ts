@@ -87,7 +87,8 @@ export type AiRun = z.infer<typeof AiRun>;
 export const AiOverview = z.object({
   settings: AiSettings,
   available: z.boolean(),
-  model: z.string(),
+  /** The model answering (an OpenRouter model ID when the server goes through OpenRouter); null when unavailable. */
+  model: z.string().nullable(),
   last30Days: z.object({ runs: z.number().int(), replied: z.number().int(), handedOver: z.number().int(), failed: z.number().int(), usage: AiUsage }),
 });
 export type AiOverview = z.infer<typeof AiOverview>;

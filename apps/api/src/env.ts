@@ -43,10 +43,16 @@ const EnvSchema = z.object({
   TELEGRAM_API_URL: z.string().url().default("https://api.telegram.org"),
   /** Minimum gap between the bot's posts in one chat; Telegram allows about 20 a minute in a group. */
   TELEGRAM_CHAT_INTERVAL_MS: z.coerce.number().int().min(0).default(3000),
-  /** Claude, for AI replies (phase B11). Without a key, apps can't turn AI replies on. */
+  /** Claude, for AI replies (phase B11). Without this or OPENROUTER_API_KEY, apps can't turn AI replies on. */
   ANTHROPIC_API_KEY: optional,
   /** The Claude API (tests point it at a fake). */
   ANTHROPIC_BASE_URL: optional,
+  /** Claude through OpenRouter, for when there's no ANTHROPIC_API_KEY (src/ai/provider.ts). */
+  OPENROUTER_API_KEY: optional,
+  /** OpenRouter's Anthropic-compatible API (tests point it at a fake). */
+  OPENROUTER_BASE_URL: z.string().url().default("https://openrouter.ai/api"),
+  /** Overrides the model: a Claude model ID directly, an OpenRouter model ID (`anthropic/…`) through OpenRouter. */
+  AI_MODEL: optional,
   /** How long after a person's last message the AI answers, so a burst of messages gets one answer. */
   AI_DEBOUNCE_MS: z.coerce.number().int().min(0).default(8000),
   /** Multiplies every rate limit (src/rate-limit.ts); 0 turns them off. */
@@ -67,7 +73,7 @@ export function loadEnv(source: Record<string, string | undefined> = process.env
   return parsed.data;
 }
 
-export const aiEnabled = (env: Env) => Boolean(env.ANTHROPIC_API_KEY);
+export const aiEnabled = (env: Env) => Boolean(env.ANTHROPIC_API_KEY || env.OPENROUTER_API_KEY);
 
 export const billingEnabled = (env: Env) =>
   Boolean(env.STRIPE_SECRET_KEY && env.STRIPE_WEBHOOK_SECRET && env.STRIPE_PRICE_MONTHLY && env.STRIPE_PRICE_YEARLY);

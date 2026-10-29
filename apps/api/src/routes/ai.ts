@@ -12,7 +12,7 @@ import { uuidv7 } from "@hshelby/core";
 import { aiRuns, aiSettings, appPaywalls, auditEvents, conversations, devices } from "@hshelby/db";
 import { and, count, desc, eq, gte, sql, sum } from "drizzle-orm";
 import { Hono } from "hono";
-import { AI_MODEL, runTurn, type Executor } from "../ai/assistant";
+import { runTurn, type Executor } from "../ai/assistant";
 import { getAiSettings, personFacts, transcriptOf } from "../ai/consider";
 import { offersFor, reviewUnavailable, systemPrompt, turnPrompt, type PersonFacts, type TranscriptMessage } from "../ai/prompt";
 import type { AppEnv, Deps } from "../context";
@@ -21,7 +21,7 @@ import { requireOrgAdmin } from "../middleware";
 import { parseJson } from "../validation";
 import { findOrgApp } from "./apps";
 
-const unavailable = () => new ApiError(409, "ai_unavailable", "AI replies need an Anthropic API key on the server (ANTHROPIC_API_KEY)");
+const unavailable = () => new ApiError(409, "ai_unavailable", "AI replies need a model key on the server (ANTHROPIC_API_KEY or OPENROUTER_API_KEY)");
 
 /** Records what the model chose without sending anything. */
 const dryRun: Executor = { reply: async () => {}, offer: async () => {}, review: async () => {}, handover: async () => {} };
@@ -51,8 +51,8 @@ export function aiRoutes(deps: Deps) {
     const t = totals!;
     const overview: AiOverview = {
       settings,
-      available: Boolean(deps.anthropic),
-      model: AI_MODEL,
+      available: Boolean(deps.ai),
+      model: deps.ai?.model ?? null,
       last30Days: {
         runs: t.runs,
         replied: t.replied,
@@ -69,7 +69,7 @@ export function aiRoutes(deps: Deps) {
     const input = await parseJson(c, AiSettingsInput);
     const org = c.get("org");
     const app = await findOrgApp(db, org.id, c.req.param("id"));
-    if (input.enabled && !deps.anthropic) throw unavailable();
+    if (input.enabled && !deps.ai) throw unavailable();
     const before = await getAiSettings(db, app.id);
     const values = { ...input, updatedAt: new Date(), updatedBy: c.get("user").id };
     await db.transaction(async (tx) => {
@@ -88,7 +88,7 @@ export function aiRoutes(deps: Deps) {
   r.post("/:id/ai/preview", requireOrgAdmin, async (c) => {
     const input = await parseJson(c, AiPreviewInput);
     const app = await findOrgApp(db, c.get("org").id, c.req.param("id"));
-    if (!deps.anthropic) throw unavailable();
+    if (!deps.ai) throw unavailable();
     const settings = input.settings ?? (await getAiSettings(db, app.id));
 
     let person: PersonFacts;
@@ -137,7 +137,7 @@ export function aiRoutes(deps: Deps) {
     const started = Date.now();
     try {
       const result = await runTurn(
-        deps.anthropic,
+        deps.ai,
         {
           system: systemPrompt(app.name, settings),
           prompt: turnPrompt(app, settings, person, transcript),

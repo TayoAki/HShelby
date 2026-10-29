@@ -1,10 +1,10 @@
-import type Anthropic from "@anthropic-ai/sdk";
 import type { AppStoreClient, Keyring } from "@hshelby/core";
 import type { Db, devices } from "@hshelby/db";
 import type { ApnsClient } from "@hshelby/push";
 import type { Storage } from "@hshelby/storage";
 import type { TelegramClient } from "@hshelby/telegram";
 import type { Logger } from "pino";
+import type { AiProvider } from "./ai/provider";
 import type { Auth } from "./auth";
 import type { Billing } from "./billing";
 import type { Env } from "./env";
@@ -30,8 +30,8 @@ export type Deps = {
   telegram: TelegramClient;
   /** Roots trusted for App Store notifications: Apple's unless a test passes its own. */
   appStoreRoots?: string[];
-  /** Claude for AI replies; null without ANTHROPIC_API_KEY. */
-  anthropic: Anthropic | null;
+  /** Claude for AI replies, directly or through OpenRouter; null without either key. */
+  ai: AiProvider | null;
   rateLimiter: RateLimiter;
 };
 

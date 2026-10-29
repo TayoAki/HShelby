@@ -1,7 +1,8 @@
-import Anthropic from "@anthropic-ai/sdk";
+import type Anthropic from "@anthropic-ai/sdk";
 import { betaZodTool } from "@anthropic-ai/sdk/helpers/beta/zod";
 import { CARD_TEXT_MAX, MESSAGE_MAX_LENGTH, type AiAction, type AiUsage, type ReportedPaywall } from "@hshelby/contracts";
 import { z } from "zod";
+import type { AiProvider } from "./provider";
 
 /*
  * One AI turn: the model reads the conversation and answers through its tools. Guardrails live in the tools'
@@ -10,7 +11,6 @@ import { z } from "zod";
  * goes through an Executor, which sends for real (the ai.consider job) or only records (the preview).
  */
 
-export const AI_MODEL = "claude-opus-5-5";
 /** Server-side fallback: when the model declines, Anthropic's recommended substitute answers in the same call. */
 const FALLBACK_BETA = "server-side-fallback-2026-07-01";
 const MAX_TOKENS = 16_000;
@@ -54,7 +54,7 @@ export type TurnResult = {
   notes: string[];
   /** The model (and its fallback) declined to answer. */
   refused: boolean;
-  /** Another model answered after Claude Opus declined. */
+  /** Another model answered after Claude declined (server-side fallback, Anthropic only). */
   fallback: boolean;
   /** Why the turn stopped early, if the conversation moved on. */
   halted: string | null;
@@ -95,7 +95,7 @@ const addUsage = (total: AiUsage, u: Anthropic.Beta.BetaUsage) => {
   total.cacheWriteTokens += u.cache_creation_input_tokens ?? 0;
 };
 
-export async function runTurn(client: Anthropic, input: TurnInput, executor: Executor): Promise<TurnResult> {
+export async function runTurn(ai: AiProvider, input: TurnInput, executor: Executor): Promise<TurnResult> {
   const actions: AiAction[] = [];
   const notes: string[] = [];
   const usage: AiUsage = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 };
@@ -219,14 +219,13 @@ export async function runTurn(client: Anthropic, input: TurnInput, executor: Exe
     }),
   ].filter((t) => t !== false);
 
-  const runner = client.beta.messages.toolRunner({
+  const runner = ai.client.beta.messages.toolRunner({
     // the whole (short) turn in every request, rather than a conversation kept on Anthropic's side
     thread: false,
-    model: AI_MODEL,
+    model: ai.model,
     max_tokens: MAX_TOKENS,
     max_iterations: MAX_ITERATIONS,
-    betas: [FALLBACK_BETA],
-    fallbacks: "default",
+    ...(ai.serverFallback ? { betas: [FALLBACK_BETA], fallbacks: "default" as const } : {}),
     output_config: { effort: "low" },
     system: input.system,
     tools,

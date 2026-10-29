@@ -197,7 +197,7 @@ export async function considerMessage(deps: Deps, job: AiConsiderJob): Promise<s
 
   const settings = await getAiSettings(db, row.app.id);
   if (!settings.enabled) return "disabled";
-  if (!deps.anthropic) return "unavailable";
+  if (!deps.ai) return "unavailable";
   try {
     await deps.billing.requireCanReply(row.conversation.organizationId, row.conversation.id);
   } catch (err) {
@@ -256,7 +256,7 @@ export async function considerMessage(deps: Deps, job: AiConsiderJob): Promise<s
   let result: TurnResult;
   try {
     result = await runTurn(
-      deps.anthropic,
+      deps.ai,
       {
         system: systemPrompt(row.app.name, settings),
         prompt: turnPrompt(row.app, settings, person, transcript),

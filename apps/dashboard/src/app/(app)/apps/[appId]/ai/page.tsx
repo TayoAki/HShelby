@@ -187,7 +187,7 @@ export default function AiPage() {
 
           <SettingsCard title="Answering">
             {!overview.available && (
-              <ErrorNote>The server has no Anthropic API key yet (ANTHROPIC_API_KEY), so AI replies can&apos;t be turned on.</ErrorNote>
+              <ErrorNote>The server has no model key yet (ANTHROPIC_API_KEY or OPENROUTER_API_KEY), so AI replies can&apos;t be turned on.</ErrorNote>
             )}
             <SwitchRow
               label="Answer with AI"
@@ -195,12 +195,12 @@ export default function AiPage() {
               checked={overview.settings.enabled}
               onChange={(enabled) => save({ ...draft, enabled })}
               disabled={!admin || busy || (!overview.available && !overview.settings.enabled)}
-              disabledReason={admin ? "Needs an Anthropic API key on the server" : "Only workspace owners and admins can change this"}
+              disabledReason={admin ? "Needs a model key on the server" : "Only workspace owners and admins can change this"}
             />
             {last && last.runs > 0 && (
               <p className="text-[13px]">
                 Last 30 days: {last.replied} answered, {last.handedOver} handed over{last.failed > 0 && `, ${last.failed} failed`} · about{" "}
-                {money(cost(last.usage))} on {overview.model}
+                {money(cost(last.usage))}{overview.model && ` on ${overview.model}`}
               </p>
             )}
           </SettingsCard>
