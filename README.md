@@ -10,6 +10,7 @@ In-app support chat for iOS apps, modelled on a study of [reception.sh](https://
 | `apps/web` | Landing-page clone from the study. Not deployed: it reproduces another company's brand. |
 | `packages/*` | `db` (Drizzle schema + migrations), `contracts` (Zod schemas), `core` (IDs, encryption, App Store client, setup prompt), `push` (APNs client and delivery), `telegram` (Bot API client, delivery, a fake Telegram for tests), `subscriptions` (provider webhooks: verification and normalization), `storage` (S3-compatible photo storage), `billing` (subscription rules and a fake Stripe for tests), `ui` (phone and chat mock). |
 | [`docs/BACKEND_PLAN.md`](docs/BACKEND_PLAN.md) | Stack, data model, API contract and phased schedule. Its Status section covers what runs on Railway staging and the variables each service needs. |
+| [`docs/SUBPROCESSORS.md`](docs/SUBPROCESSORS.md), [`docs/RUNBOOK.md`](docs/RUNBOOK.md) | Who processes customer data (for the DPA); restores, the restore drill and the load test. |
 | [`docs/PRODUCT_TEARDOWN.md`](docs/PRODUCT_TEARDOWN.md) | How reception works: features, SDK surface, identity flow, inferred architecture. |
 | [`SITE_SPEC.md`](SITE_SPEC.md), [`preview/`](preview/) | Spec, video and screenshots of the landing-page clone. |
 

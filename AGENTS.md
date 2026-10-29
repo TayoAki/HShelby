@@ -24,6 +24,7 @@ npm-workspaces monorepo. Node 22.
 - Railway redeploys a service only when its watch patterns match the change. When an app gains a workspace dependency, add that package's path to the service's watch patterns (see `docs/BACKEND_PLAN.md` Status).
 - AI replies eval (real model, needs `ANTHROPIC_API_KEY` or `OPENROUTER_API_KEY`): `npm run eval -w @hshelby/api`. Not part of `npm test`.
 - Plan and phases: `docs/BACKEND_PLAN.md`. Stripe runs in test mode only; the API refuses `sk_live_` keys.
+- Who processes customer data: `docs/SUBPROCESSORS.md`. Update it before data goes anywhere new (a new provider, `OPENROUTER_PROVIDERS`, a non-Claude `AI_MODEL`, an email or monitoring service).
 - Restores, the monthly restore drill and the load test: `docs/RUNBOOK.md`. The API's rate limits scale with `RATE_LIMIT_SCALE` (tests set `0`); a load test from one machine needs it raised on the api.
 
 The Next.js apps use Next 16, which differs from older versions: read `node_modules/next/dist/docs/` before changing Next.js code (`next dev` also writes its own `AGENTS.md` block inside each Next app).

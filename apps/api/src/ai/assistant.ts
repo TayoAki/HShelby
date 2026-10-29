@@ -226,6 +226,7 @@ export async function runTurn(ai: AiProvider, input: TurnInput, executor: Execut
     max_tokens: MAX_TOKENS,
     max_iterations: MAX_ITERATIONS,
     ...(ai.serverFallback ? { betas: [FALLBACK_BETA], fallbacks: "default" as const } : {}),
+    ...ai.extraBody,
     output_config: { effort: "low" },
     system: input.system,
     tools,

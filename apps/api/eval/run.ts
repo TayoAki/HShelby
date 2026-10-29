@@ -118,6 +118,7 @@ async function main() {
       ANTHROPIC_BASE_URL: env.ANTHROPIC_BASE_URL,
       OPENROUTER_API_KEY: env.OPENROUTER_API_KEY,
       OPENROUTER_BASE_URL: env.OPENROUTER_BASE_URL ?? "https://openrouter.ai/api",
+      OPENROUTER_PROVIDERS: env.OPENROUTER_PROVIDERS ?? "anthropic",
       AI_MODEL: env.AI_MODEL,
     },
     { maxRetries: 4 },

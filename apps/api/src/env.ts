@@ -51,6 +51,8 @@ const EnvSchema = z.object({
   OPENROUTER_API_KEY: optional,
   /** OpenRouter's Anthropic-compatible API (tests point it at a fake). */
   OPENROUTER_BASE_URL: z.string().url().default("https://openrouter.ai/api"),
+  /** Which OpenRouter providers may serve the model, comma-separated; empty lets OpenRouter choose (src/ai/provider.ts). */
+  OPENROUTER_PROVIDERS: z.string().default("anthropic"),
   /** Overrides the model: a Claude model ID directly, an OpenRouter model ID (`anthropic/…`) through OpenRouter. */
   AI_MODEL: optional,
   /** How long after a person's last message the AI answers, so a burst of messages gets one answer. */

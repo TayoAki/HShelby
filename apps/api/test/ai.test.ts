@@ -351,19 +351,26 @@ describe("preview", () => {
 
 describe("through OpenRouter", () => {
   it("takes the Anthropic key first, then OpenRouter's, and AI_MODEL overrides the model", () => {
-    const base = { ANTHROPIC_BASE_URL: undefined, OPENROUTER_BASE_URL: "https://openrouter.ai/api", AI_MODEL: undefined };
+    const base = { ANTHROPIC_BASE_URL: undefined, OPENROUTER_BASE_URL: "https://openrouter.ai/api", OPENROUTER_PROVIDERS: "anthropic", AI_MODEL: undefined };
     expect(aiProviderFromEnv({ ...base, ANTHROPIC_API_KEY: undefined, OPENROUTER_API_KEY: undefined })).toBeNull();
     expect(aiProviderFromEnv({ ...base, ANTHROPIC_API_KEY: "sk-ant", OPENROUTER_API_KEY: "sk-or" })).toMatchObject({ name: "anthropic", model: "claude-opus-5-5", serverFallback: true });
     expect(aiProviderFromEnv({ ...base, ANTHROPIC_API_KEY: undefined, OPENROUTER_API_KEY: "sk-or" })).toMatchObject({ name: "openrouter", model: "anthropic/claude-opus-5.5", serverFallback: false });
     expect(aiProviderFromEnv({ ...base, ANTHROPIC_API_KEY: undefined, OPENROUTER_API_KEY: "sk-or", AI_MODEL: "anthropic/claude-sonnet-5.5" })?.model).toBe("anthropic/claude-sonnet-5.5");
+    // the routing pin: Anthropic only by default, a list or nothing when set
+    expect(aiProviderFromEnv({ ...base, ANTHROPIC_API_KEY: "sk-ant", OPENROUTER_API_KEY: undefined })?.extraBody).toEqual({});
+    expect(aiProviderFromEnv({ ...base, ANTHROPIC_API_KEY: undefined, OPENROUTER_API_KEY: "sk-or", OPENROUTER_PROVIDERS: "anthropic, google-vertex" })?.extraBody).toEqual({
+      provider: { only: ["anthropic", "google-vertex"], allow_fallbacks: false, data_collection: "deny" },
+    });
+    expect(aiProviderFromEnv({ ...base, ANTHROPIC_API_KEY: undefined, OPENROUTER_API_KEY: "sk-or", OPENROUTER_PROVIDERS: "" })?.extraBody).toEqual({ provider: { data_collection: "deny" } });
   });
 
-  it("sends the key as a bearer token, names OpenRouter's model and leaves out the server-side fallback", async () => {
+  it("sends the key as a bearer token, names OpenRouter's model, pins Anthropic and leaves out the server-side fallback", async () => {
     const ai = aiProviderFromEnv({
       ANTHROPIC_API_KEY: undefined,
       ANTHROPIC_BASE_URL: undefined,
       OPENROUTER_API_KEY: "sk-or-test",
       OPENROUTER_BASE_URL: fake.url,
+      OPENROUTER_PROVIDERS: "anthropic",
       AI_MODEL: undefined,
     })!;
     const sent: string[] = [];
@@ -384,6 +391,7 @@ describe("through OpenRouter", () => {
     expect(String(request!.headers["anthropic-beta"] ?? "")).not.toContain("server-side-fallback");
     expect(request!.body).toMatchObject({ model: "anthropic/claude-opus-5.5", output_config: { effort: "low" } });
     expect(request!.body.fallbacks).toBeUndefined();
+    expect(request!.body.provider).toEqual({ only: ["anthropic"], allow_fallbacks: false, data_collection: "deny" });
     expect(request!.body.tools.map((t: any) => [t.name, t.strict])).toEqual([
       ["reply", true],
       ["handover", true],
