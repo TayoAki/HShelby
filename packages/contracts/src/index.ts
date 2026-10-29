@@ -45,6 +45,8 @@ export const errorCodes = [
   "invalid_image",
   "asset_quota_exceeded",
   "asset_in_use",
+  "integration_not_connected",
+  "invalid_signature",
   "internal_error",
 ] as const;
 export type ErrorCode = (typeof errorCodes)[number];
@@ -126,6 +128,7 @@ export const AppStoreSearch = z.object({ results: z.array(AppStoreResult) });
 export type AppStoreSearch = z.infer<typeof AppStoreSearch>;
 
 export * from "./appearance";
+export * from "./automations";
 export * from "./billing";
 export * from "./cards";
 export * from "./identity";
@@ -133,4 +136,5 @@ export * from "./messaging";
 export * from "./photos";
 export * from "./push";
 export * from "./realtime";
+export * from "./subscriptions";
 export * from "./telegram";

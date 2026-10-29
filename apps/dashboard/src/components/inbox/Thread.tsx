@@ -597,6 +597,14 @@ export function Thread({ conversationId }: { conversationId: string }) {
           />
           {device.push.issue && <Detail label="Push issue" value={device.push.issue} />}
         </DetailsSection>
+        {device.subscription && (
+          <DetailsSection title="Subscription">
+            <Detail label="Status" value={`${device.subscription.status.replace("_", " ")}${device.subscription.paying ? " · paying" : ""}`} />
+            <Detail label="Product" value={device.subscription.productId} />
+            <Detail label="Renews or ends" value={device.subscription.expiresAt ? new Date(device.subscription.expiresAt).toLocaleDateString() : null} />
+            <Detail label="From" value={device.subscription.provider} />
+          </DetailsSection>
+        )}
         <DetailsSection title="Offers and reviews">
           <Detail
             label="Paywalls"

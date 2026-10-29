@@ -6,3 +6,4 @@ export * from "./attachments";
 export * from "./cards";
 export * from "./telegram";
 export * from "./appearance";
+export * from "./automations";

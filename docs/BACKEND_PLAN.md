@@ -27,7 +27,7 @@ Why one Postgres for everything at the start: messages, the job queue, realtime 
 
 ## Status
 
-**B0–B9 run on Railway staging** (billing is switched off there until the Stripe test secret key is set) (project `hshelby`, environment `staging`): dashboard at `https://dashboard-staging-0dee.up.railway.app`, API at `https://api-staging-f8f8.up.railway.app`.
+**B0–B10 run on Railway staging** (billing is switched off there until the Stripe test secret key is set) (project `hshelby`, environment `staging`): dashboard at `https://dashboard-staging-0dee.up.railway.app`, API at `https://api-staging-f8f8.up.railway.app`.
 
 B1 (messaging core) as built:
 
@@ -140,6 +140,27 @@ B9 (appearance and assets) as built:
 - **Dashboard:** a Chat design editor (`/apps/:id/appearance`: colors per mode, texts per language, icons, font, close button, card styling, team switches, a live light/dark phone preview, Save draft / Publish / Discard, the conflict notice), an Asset library page with the quota, and an account page for the profile photo.
 - **Done-when tests** (`apps/api/test/appearance.test.ts`): the SDK gets nothing before the first publish, the published document after it, and never a later draft; images in drafts aren't served; stale saves and publishes are refused; ETag/304; validation and admin-only editing; conversion of JPEG, WebP and SVG, unsafe SVGs and oversized files refused, in-use images kept; reply authors with names and photos switched on and off.
 - **Deferred:** the 48 built-in languages' matching rules live in the SDK; "Users" page and per-teammate team names (the user's account name is used).
+- **Checked on staging:** the same walkthrough runs against staging (Railway Bucket, sharp on Railway): the SDK gets nothing before publishing, the design after, the icon PNG from `/v1/assets`, and reply authors with photo links.
+
+B10 (subscriptions and automations) as built:
+
+- **Package** `packages/subscriptions`: verification and normalization for the four providers, and `@hshelby/subscriptions/testing` (fixtures shaped like each provider's documented payloads, with the canonical event each should become, and an App Store signer on a test certificate chain).
+  - **RevenueCat** and **Adapty**: an Authorization header value we generate (`Bearer …`, encrypted at rest, shown to admins), compared in constant time. Adapty's URL check (an empty `{}` when the webhook is saved) gets `{}`.
+  - **Superwall**: its `whsec_` signing secret, Svix-style HMAC over `id.timestamp.body` (`webhook-*` or `svix-*` headers), timestamps within 5 minutes. Refunds are its transactions with a negative price.
+  - **App Store Server Notifications v2**: no secret. The `signedPayload` JWS and the transaction inside it must carry a three-certificate x5c chain ending at Apple Root CA - G3 (embedded, SHA-256 `63:34:3A:…:91:79`), with Apple's marker extensions on the intermediate and signing certificates, valid dates and an ES256 signature; the bundle ID must match the app's.
+  - **Normalization** to the ten canonical events (`trial_started`, `trial_converted`, `trial_cancelled`, `trial_expired`, `subscription_started`, `subscription_renewed`, `subscription_cancelled`, `billing_issue`, `subscription_expired`, `refunded`). Uncancellations, product changes and the like are accepted and ignored; tests are logged as tests. Apple's converted trial is a plain renewal.
+- **Receivers** at `/webhooks/{revenuecat,superwall,adapty,appstore}/<public App ID>`: verify, normalize, then in one transaction record the event (unique per app, provider and event ID, so redeliveries are no-ops), match the person, update their devices' subscription state (`devices.subscription`: status, paying, product, expiry) and queue `automation.event`. Refusals (bad secret or signature, not connected, wrong bundle ID, unreadable payload) are logged too.
+- **Matching:** the app's user ID, the provider's sticky metadata key (`revenuecat_id`, `superwall_id`, `adapty_id`), a StoreKit original transaction ID the SDK reported (`PATCH /v1/device {storekit: {originalTransactionIds, paying}}`, kept across reports, at most 50), or an App Store `appAccountToken` equal to the user ID; then every signed-in device with the same user ID.
+- **Automations** (`/api/apps/:id/automations`, admins edit): a trigger (an event the app tracks, or one of the ten), once per person or every time after the previous run, an audience (everyone / without / with a subscription, up to four metadata rules, "also during a conversation"), a wait (right away, a delay, or a local time on a later day), push on or off (offers always push), up to eight steps (message, offer, rating, wait, open chat) and a sender (a teammate or the team).
+- **The engine** (`apps/api/src/automations`): an event starts a run per matching automation (an advisory lock keeps simultaneous events from starting two). People blocked, signed out, outside the audience or in a conversation from the last 24 hours are skipped (and a later event catches them). Before anything is sent, every offer must be a paywall the device can show and a rating needs the App Store ID and someone not yet asked; otherwise the run is **held** and retried at the person's next event. Steps after a wait are re-checked: a reply, an audience change or a gone offer **ends** the run. Each message and the run's move past its step commit together (guarded by the step index), so a retried job never sends twice. Switching an automation off ends its scheduled runs.
+- **Waits** are `automation.step` jobs with `startAfter`; "tomorrow at 10:00" is computed in the device's time zone with Intl (DST changes and skipped hours handled, UTC without a zone). Automation jobs run in the API process (they only write messages, through the same code as replies), polled every 10 s.
+- **Delivery:** messages from automations are `source: automation`, unread, with one push if on. A conversation an automation starts stays out of the inbox (and out of Telegram) until the person writes.
+- **SDK:** `POST /v1/track {event}` runs automations for the event and answers `{sent, openChat}` after any immediate sends; `GET /v1/track/events` lists the events enabled automations listen for (refetch after 5 minutes). Subscription events can't be tracked from the app.
+- **Results** (`…/automations/:id/results`): got the message, opened the offer or tapped Rate, replied, bought within 7 days (a start, trial or conversion event for the device), the scheduled queue and the skipped, held and ended runs with reasons.
+- **Dashboard:** Subscription providers on the app's settings page (connect, webhook URL and Authorization value to copy, Superwall secret, App Store steps, Recent events), an Automations page (list, on/off, builder, results), and the person's subscription in the inbox details.
+- **Simulator:** `--track event` (or `/track event` in `--chat`), `--storekit-tx ID`, `--paying`.
+- **Done-when tests:** `packages/subscriptions/test` replays every provider's fixture set to the expected canonical events (56 cases, plus signature refusals); `apps/api/test/automations.test.ts` sends a real RevenueCat cancellation for people in Los Angeles, Berlin and Tokyo and checks each run (and its job) is due at 10:00 the next day in their zone (17:00, 09:00 and 01:00 UTC), then sends the offer. The same files cover the receivers, matching, dedupe, audiences, suppression, holds, waits and re-checks, exactly-once steps, results and permissions.
+- **Not checked here:** real deliveries from the providers (they need accounts and live webhooks); everything is tested against their documented payload shapes.
 
 Where B0 differs from the plan below:
 
@@ -151,7 +172,7 @@ Railway layout:
 
 | Service | Build / start | Notes |
 |---|---|---|
-| `api` | `npm run build -w @hshelby/api` / `npm run start -w @hshelby/api` | Pre-deploy `npm run migrate -w @hshelby/api`; healthcheck `/health` (runs `select 1`). |
+| `api` | `npm run build -w @hshelby/api` / `npm run start -w @hshelby/api` | Pre-deploy `npm run migrate -w @hshelby/api`; healthcheck `/health` (runs `select 1`). Also works the `automation.event` and `automation.step` queues. |
 | `worker` | same with `@hshelby/worker` | pg-boss: `push.send`, `team.notify` and `telegram.send`, nightly cleanup at 03:00 UTC, deleted-app purge every 15 minutes, unsent-upload sweep and `billing.sync` hourly. |
 | `dashboard` | same with `@hshelby/dashboard` | Healthcheck `/health`. Proxies `/api/*` to the API over the private network, so auth cookies are first-party. |
 | `Postgres` | Railway template | |
@@ -476,7 +497,7 @@ Each phase ends with acceptance tests that must pass in CI and on staging.
 | **B7 Cards** (done, see Status) | Review + offer cards, paywall registry from device reports, click receipts, stats | An offer card for an unreported paywall is refused; the first tap is recorded once | 1 wk |
 | **B8 Telegram** (done, see Status) | Connect bot, notify, reply mapping, reactions, supergroup migration, throttle | Replying in Telegram lands in the app chat; 50 bursts respect the per-chat limit | 1.5 wks |
 | **B9 Appearance & assets** (done, see Status) | Draft/publish remote appearance, asset library (PNG ≤ 512 px), team photos | SDK fetches the published version; drafts never leak | 1 wk |
-| **B10 Subscriptions + automations** | Four provider receivers, normalization, matching, automation builder API, run engine with waits, suppression, holds, results | Replaying each provider's fixture set yields the expected canonical events; a "cancelled → offer tomorrow 10:00 local" run fires at the right UTC time across 3 time zones | 3 wks |
+| **B10 Subscriptions + automations** (done, see Status) | Four provider receivers, normalization, matching, automation builder API, run engine with waits, suppression, holds, results | Replaying each provider's fixture set yields the expected canonical events; a "cancelled → offer tomorrow 10:00 local" run fires at the right UTC time across 3 time zones | 3 wks |
 | **B11 AI replies** | See §11 | Eval set passes the bar you set; handover never double-replies | 2–3 wks |
 | **B12 Hardening** | Load test, Redis if needed, audit log, restore drill | 1,000 polling devices + 50 msgs/s holds p95 < 150 ms on staging | 1 wk |
 

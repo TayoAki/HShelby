@@ -118,12 +118,14 @@ async function recordIssue(db: Db | Tx, appId: string, issue: string) {
  */
 export async function planNotify(db: Db, messageId: string) {
   const [row] = await db
-    .select({ message: messages, appId: conversations.appId, connection: telegramConnections })
+    .select({ message: messages, appId: conversations.appId, engaged: conversations.userEngaged, connection: telegramConnections })
     .from(messages)
     .innerJoin(conversations, eq(conversations.id, messages.conversationId))
     .innerJoin(telegramConnections, eq(telegramConnections.appId, conversations.appId))
     .where(eq(messages.id, messageId));
   if (!row || row.connection.paused) return null;
+  // an automation's messages to someone who hasn't written stay out of the team's chat, like out of the inbox
+  if (!row.engaged) return null;
   if (row.message.sender === "agent" && row.message.source === "telegram") return null;
   const job: TelegramJob = { kind: row.message.sender === "user" ? "notify" : "mirror", messageId };
   return { job, botId: row.connection.botId, chatId: row.connection.chatId };

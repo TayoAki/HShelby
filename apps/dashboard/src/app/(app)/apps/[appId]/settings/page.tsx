@@ -7,6 +7,7 @@ import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import { AppHeader } from "@/components/AppHeader";
 import { PaywallsCard, ReviewsAndOffersCard } from "@/components/CardSettingsCards";
+import { IntegrationsCard } from "@/components/IntegrationsCard";
 import { PushSettingsCard } from "@/components/PushSettingsCard";
 import { TelegramSettingsCard } from "@/components/TelegramSettingsCard";
 import { CopyBlock, secondaryButton, SettingsCard, SwitchRow } from "@/components/settings";
@@ -197,6 +198,13 @@ export default function AppSettingsPage() {
           <TelegramSettingsCard app={app} admin={admin} />
           <ReviewsAndOffersCard app={app} admin={admin} onAppChange={setApp} />
           <PaywallsCard app={app} />
+          <SettingsCard title="Automations">
+            <p>Messages, offers and rating requests that go out on their own when someone declines a paywall, cancels a subscription and more.</p>
+            <Link href={`/apps/${app.id}/automations`} className={`inline-flex items-center ${secondaryButton}`}>
+              Open automations
+            </Link>
+          </SettingsCard>
+          <IntegrationsCard app={app} admin={admin} />
         </main>
       )}
     </div>

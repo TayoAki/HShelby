@@ -26,6 +26,8 @@ export type Deps = {
   billing: Billing;
   /** Telegram connections are set up from the API; posts go out from the worker. */
   telegram: TelegramClient;
+  /** Roots trusted for App Store notifications: Apple's unless a test passes its own. */
+  appStoreRoots?: string[];
 };
 
 type SessionResult = NonNullable<Awaited<ReturnType<Auth["api"]["getSession"]>>>;

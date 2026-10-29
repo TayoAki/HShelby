@@ -51,6 +51,8 @@ export async function appendUserMessage(
             // the sender has seen everything up to their own message
             userReadSeq: sql`${conversations.lastSeq} + 1`,
             unreadForUser: 0,
+            // a conversation an automation started reaches the inbox once the person writes
+            userEngaged: true,
           })
           .where(live(input.deviceId))
           .returning();
@@ -119,6 +121,8 @@ export type AgentMessageInput = {
   /** A review or offer card (phase B7); plain text otherwise. */
   card?: StoredCard;
   source?: "dashboard" | "telegram" | "automation" | "ai";
+  /** False skips the push (automations that send quietly). */
+  push?: boolean;
 };
 
 /**
@@ -190,7 +194,7 @@ export async function appendAgentMessage(
         uploadedBy: "agent",
         ids: input.attachmentIds,
       });
-      await jobs.pushMessage(tx, message!.id);
+      if (input.push !== false) await jobs.pushMessage(tx, message!.id);
       if (source !== "telegram") await jobs.notifyTeam(tx, message!.id);
       await publishLive(tx, {
         type: "message",

@@ -19,7 +19,7 @@ function storageFromEnv(env: Env) {
 
 export function createDeps(
   env: Env,
-  overrides: Partial<Pick<Deps, "appStore" | "logger" | "apns" | "storage">> & { stripe?: Stripe } = {},
+  overrides: Partial<Pick<Deps, "appStore" | "logger" | "apns" | "storage" | "appStoreRoots">> & { stripe?: Stripe } = {},
 ) {
   const logger =
     overrides.logger ??
@@ -40,6 +40,7 @@ export function createDeps(
     apns: overrides.apns ?? createApnsClient(),
     storage: overrides.storage !== undefined ? overrides.storage : storageFromEnv(env),
     telegram: createTelegramClient({ baseUrl: env.TELEGRAM_API_URL }),
+    appStoreRoots: overrides.appStoreRoots,
   };
   return { deps, pool };
 }

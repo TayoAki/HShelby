@@ -63,6 +63,7 @@ const toInboxDevice = (d: DeviceRow): InboxDevice => ({
   paywalls: d.availablePaywalls,
   paywallsReportedAt: d.paywallsReportedAt?.toISOString() ?? null,
   reviewAskedAt: d.reviewAskedAt?.toISOString() ?? null,
+  subscription: d.subscription ?? null,
 });
 
 /** ILIKE pattern for a literal substring. */
@@ -151,6 +152,7 @@ export function conversationRoutes(deps: Deps) {
       .where(
         and(
           eq(conversations.organizationId, c.get("org").id),
+          eq(conversations.userEngaged, true),
           query.status === "all" ? undefined : eq(conversations.status, query.status),
           query.appId ? eq(conversations.appId, query.appId) : undefined,
           query.q

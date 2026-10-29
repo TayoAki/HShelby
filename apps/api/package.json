@@ -12,6 +12,7 @@
     "@hshelby/db": "*",
     "@hshelby/push": "*",
     "@hshelby/storage": "*",
+    "@hshelby/subscriptions": "*",
     "@hshelby/telegram": "*",
     "better-auth": "^1.7.14",
     "drizzle-orm": "^0.45.4",

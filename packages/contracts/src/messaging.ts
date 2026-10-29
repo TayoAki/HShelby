@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { LocalAppearance } from "./appearance";
+import { DeviceSubscription } from "./subscriptions";
 import { InboxCard, MessageKind, ReportedPaywall, ReportedPaywalls, SdkCard } from "./cards";
 import { IdentityLabels, IdentityToken, Metadata, SdkIdentity } from "./identity";
 import { Attachment, PHOTO_LIMITS } from "./photos";
@@ -70,6 +71,18 @@ const DeviceState = {
   paywalls: ReportedPaywalls.optional(),
   /** The app's own appearance settings (phase B9), where the dashboard's design editor starts. */
   appearance: LocalAppearance.optional(),
+  /**
+   * What StoreKit says on the device (phase B10): whether the person pays, and the original transaction IDs of
+   * their subscriptions, which match App Store Server Notifications to them. IDs are kept across reports.
+   */
+  storekit: z
+    .object({
+      paying: z.boolean(),
+      originalTransactionIds: z.array(z.string().regex(/^\d{1,20}$/)).max(20),
+    })
+    .partial()
+    .strict()
+    .optional(),
 };
 
 export const RegisterDeviceInput = z
@@ -180,6 +193,8 @@ export const InboxDevice = z.object({
   paywallsReportedAt: z.string().nullable(),
   /** When the team last asked this device for a review. */
   reviewAskedAt: z.string().nullable(),
+  /** The subscription as the provider last reported it (phase B10). */
+  subscription: DeviceSubscription.nullable(),
 });
 export type InboxDevice = z.infer<typeof InboxDevice>;
 

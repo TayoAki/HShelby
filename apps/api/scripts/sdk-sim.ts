@@ -15,6 +15,10 @@
  *                   so "Send test" and replies target this device
  * --paywall ID=TITLE  report a paywall the app can show (repeatable; replaces the list), so the team can send
  *                   offers for it. In --chat, type /tap to tap the latest card's button.
+ * --track EVENT     track an event (repeatable), as the app does for automations; prints whether one sent a
+ *                   message and asked to open the chat. In --chat, type /track EVENT.
+ * --storekit-tx ID  report a StoreKit original transaction ID (repeatable), which App Store notifications match
+ * --paying          report that StoreKit says the person pays
  * --logout          logout(): end this device; the next run registers a new one
  * --delete          deleteData(): remove this device and its history
  * --new-device      start over as a new install
@@ -60,6 +64,9 @@ const { values: args } = parseArgs({
     "push-token": { type: "string" },
     "push-env": { type: "string", default: "sandbox" },
     paywall: { type: "string", multiple: true },
+    track: { type: "string", multiple: true, default: [] },
+    "storekit-tx": { type: "string", multiple: true },
+    paying: { type: "boolean" },
     logout: { type: "boolean", default: false },
     delete: { type: "boolean", default: false },
   },
@@ -117,6 +124,9 @@ async function stagedState() {
     ...(metadata && { metadata }),
     ...(pushToken && { push: { token: pushToken, environment: args["push-env"] } }),
     ...(paywalls && { paywalls }),
+    ...((args["storekit-tx"] || args.paying !== undefined) && {
+      storekit: { ...(args.paying !== undefined && { paying: args.paying }), ...(args["storekit-tx"] && { originalTransactionIds: args["storekit-tx"] }) },
+    }),
   };
 }
 
@@ -277,6 +287,14 @@ for (const text of args.say) {
 
 if (args.photo.length > 0) await sendPhotos(args.photo, args.caption);
 
+/** What the SDK's track() does: the server runs automations listening for the event right away. */
+async function trackEvent(event: string) {
+  const outcome = await request<{ sent: boolean; openChat: boolean }>("/v1/track", { method: "POST", body: JSON.stringify({ event }) });
+  console.log(`       (tracked ${event}: ${outcome.sent ? "an automation sent a message" : "nothing sent"}${outcome.openChat ? ", open the chat" : ""})`);
+  if (outcome.sent) await sync();
+}
+for (const event of args.track) await trackEvent(event);
+
 /** The SDK's live connection while the chat is open: events trigger a sync; polling covers the gaps. */
 let socket: WebSocket | null = null;
 function goLive() {
@@ -323,6 +341,7 @@ if (args.chat) {
   createInterface({ input: process.stdin }).on("line", (line) => {
     const text = line.trim();
     if (text === "/tap") tapLastCard().catch((err: unknown) => console.error(String(err)));
+    else if (text.startsWith("/track ")) trackEvent(text.slice(7).trim()).catch((err: unknown) => console.error(String(err)));
     else if (text) send(text).catch((err: unknown) => console.error(String(err)));
   });
 }

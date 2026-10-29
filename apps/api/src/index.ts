@@ -1,3 +1,4 @@
+import { executeRun, onEvent } from "./automations/engine";
 import { createDeps } from "./deps";
 import { billingEnabled, loadEnv } from "./env";
 import { startServer } from "./server";
@@ -5,6 +6,8 @@ import { startServer } from "./server";
 const env = loadEnv();
 const { deps, pool } = createDeps(env);
 await deps.jobs.start();
+// automation jobs write messages through the same code as replies, so they run here
+await deps.jobs.workAutomations({ event: (job) => onEvent(deps, job), step: (job) => executeRun(deps, job.runId) });
 
 // "::" listens on IPv6 + IPv4, which Railway's private network needs; fall back to IPv4-only hosts.
 const running = await startServer(deps, { port: env.PORT, hostname: "::" }).catch((err: NodeJS.ErrnoException) => {

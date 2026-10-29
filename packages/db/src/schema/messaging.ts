@@ -1,4 +1,4 @@
-import type { ReportedPaywall, StoredCard } from "@hshelby/contracts";
+import type { DeviceSubscription, ReportedPaywall, StoredCard } from "@hshelby/contracts";
 import { sql } from "drizzle-orm";
 import { bigint, boolean, index, integer, jsonb, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 import { apps } from "./apps";
@@ -61,6 +61,12 @@ export const devices = pgTable(
     paywallsReportedAt: ts("paywalls_reported_at"),
     /** The last review card sent to this device: automations skip devices already asked. */
     reviewAskedAt: ts("review_asked_at"),
+    /** The subscription as the latest provider event left it (phase B10). */
+    subscription: jsonb("subscription").$type<DeviceSubscription>(),
+    /** Whether StoreKit on the device says the person pays (null until the SDK reports it). */
+    reportedPaying: boolean("reported_paying"),
+    /** StoreKit original transaction IDs the SDK reported: App Store notifications find the person by them. */
+    originalTransactionIds: text("original_transaction_ids").array().notNull().default(sql`'{}'::text[]`),
     /** logout(): the credential is dead and the history stays; the app registers a new device next. */
     signedOutAt: ts("signed_out_at"),
     createdAt: ts("created_at").notNull().defaultNow(),
@@ -72,6 +78,7 @@ export const devices = pgTable(
     index("devices_app_idx").on(t.appId),
     index("devices_app_user_idx").on(t.appId, t.userIdExt),
     index("devices_app_push_token_idx").on(t.appId, t.pushToken).where(sql`${t.pushToken} is not null`),
+    index("devices_original_transactions_idx").using("gin", t.originalTransactionIds),
   ],
 );
 
@@ -103,6 +110,11 @@ export const conversations = pgTable(
     lastMessageAt: timestamp("last_message_at", { withTimezone: true, mode: "date", precision: 3 }).notNull().defaultNow(),
     /** Set when identity changes start a fresh conversation for the device (phase B4). */
     supersededAt: ts("superseded_at"),
+    /**
+     * False for a conversation an automation started, until the person writes back: the inbox shows only
+     * conversations the person engaged in (phase B10).
+     */
+    userEngaged: boolean("user_engaged").notNull().default(true),
     createdAt: ts("created_at").notNull().defaultNow(),
     updatedAt: ts("updated_at").notNull().defaultNow(),
   },

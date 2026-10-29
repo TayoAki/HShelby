@@ -1,5 +1,7 @@
 import {
   ActionClickInput,
+  isSubscriptionEvent,
+  TrackInput,
   DeviceUpdateInput,
   LogoutInput,
   MessagePageQuery,
@@ -19,10 +21,11 @@ import {
   type UploadTicket,
 } from "@hshelby/contracts";
 import { decryptSecret, newDeviceSecret, uuidv7 } from "@hshelby/core";
-import { appAppearance, apps, attachments, conversations, devices, type Db, type Tx } from "@hshelby/db";
+import { appAppearance, apps, attachments, automations, conversations, devices, type Db, type Tx } from "@hshelby/db";
 import { and, count, eq, gt, isNull, ne, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import type { Deps, SdkEnv } from "../context";
+import { onEvent } from "../automations/engine";
 import { recordAppPaywalls, recordClick, toSdkCard } from "../cards";
 import { hashDeviceSecret, signAccessToken } from "../device-tokens";
 import { ApiError } from "../errors";
@@ -107,6 +110,22 @@ async function recordLocalAppearance(db: Db | Tx, appId: string, appearance: Loc
 const paywallColumns = (paywalls: ReportedPaywall[] | undefined) =>
   paywalls === undefined ? {} : { availablePaywalls: paywalls, paywallsReportedAt: new Date() };
 
+/**
+ * Device columns for a StoreKit report: whether the person pays, and their original transaction IDs (kept across
+ * reports, newest last, at most 50), which match App Store notifications to them.
+ */
+const storekitColumns = (storekit: { paying?: boolean; originalTransactionIds?: string[] } | undefined) => ({
+  ...(storekit?.paying !== undefined && { reportedPaying: storekit.paying }),
+  ...(storekit?.originalTransactionIds?.length && {
+    originalTransactionIds: sql`(select coalesce(array_agg(t order by n), '{}') from (
+        select t, max(n) as n from unnest(${devices.originalTransactionIds} || array[${sql.join(
+          storekit.originalTransactionIds.map((id) => sql`${id}`),
+          sql`, `,
+        )}]::text[]) with ordinality as x(t, n)
+        group by t order by max(n) desc limit 50) kept)`,
+  }),
+});
+
 /** Sending and uploading are refused the same way: blocked devices, and unverified ones where only verified users may chat. */
 function assertCanSend(device: Parameters<typeof sendingState>[0], onlyVerified: boolean) {
   const sending = sendingState(device, onlyVerified);
@@ -179,6 +198,7 @@ export function sdkRoutes(deps: Deps) {
           metadata: input.metadata ? nextMetadata({}, input.metadata) : {},
           ...pushColumns(input.push),
           ...paywallColumns(input.paywalls),
+          ...(input.storekit && { reportedPaying: input.storekit.paying ?? null, originalTransactionIds: input.storekit.originalTransactionIds?.slice(-50) ?? [] }),
         })
         .returning();
       if (input.push) await releasePushToken(tx, app.id, input.push.token, deviceId);
@@ -246,6 +266,7 @@ export function sdkRoutes(deps: Deps) {
           ...(input.metadata && { metadata: nextMetadata(current!.metadata, input.metadata) }),
           ...pushColumns(input.push),
           ...paywallColumns(input.paywalls),
+          ...storekitColumns(input.storekit),
           updatedAt: new Date(),
         })
         .where(eq(devices.id, current!.id))
@@ -395,6 +416,28 @@ export function sdkRoutes(deps: Deps) {
       });
     }
     return c.json({ actionClickedAt: result.actionClickedAt.toISOString(), first: result.first });
+  });
+
+  /**
+   * An event the app tracked (`paywall_declined`…): runs the automations listening for it. Runs that send right
+   * away do so before answering, so `openChat` can open the chat on the message.
+   */
+  r.post("/track", auth, async (c) => {
+    const { event } = await parseJson(c, TrackInput);
+    // subscription events come from the providers, never from the app
+    if (isSubscriptionEvent(event)) throw new ApiError(400, "validation_failed", "event: subscription events come from your subscription provider");
+    const outcome = await onEvent(deps, { appId: c.get("app").id, deviceIds: [c.get("device").id], event });
+    return c.json(outcome);
+  });
+
+  /** The events an enabled automation listens for: the SDK sends only these, and asks again after `ttlSeconds`. */
+  r.get("/track/events", auth, async (c) => {
+    const rows = await db
+      .selectDistinct({ event: automations.triggerEvent })
+      .from(automations)
+      .where(and(eq(automations.appId, c.get("app").id), eq(automations.enabled, true)));
+    c.header("Cache-Control", "private, max-age=300");
+    return c.json({ events: rows.map((r) => r.event).filter((e) => !isSubscriptionEvent(e)).sort(), ttlSeconds: 300 });
   });
 
   r.post("/read", auth, async (c) => {

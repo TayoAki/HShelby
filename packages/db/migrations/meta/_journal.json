@@ -71,6 +71,13 @@
       "when": 1793234016775,
       "tag": "0009_appearance",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1793235261820,
+      "tag": "0010_automations",
+      "breakpoints": true
     }
   ]
 }

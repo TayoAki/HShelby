@@ -9,6 +9,8 @@ import { requireOrg, requireSession } from "./middleware";
 import { accountRoutes } from "./routes/account";
 import { appearanceRoutes, assetRoutes, profilePhotoRoutes, publicAppearanceRoutes } from "./routes/appearance";
 import { appRoutes } from "./routes/apps";
+import { automationRoutes } from "./routes/automations";
+import { integrationRoutes, providerWebhookRoutes } from "./routes/integrations";
 import { conversationRoutes, deviceRoutes } from "./routes/inbox";
 import { pushRoutes } from "./routes/push";
 import { sdkRoutes } from "./routes/sdk";
@@ -66,6 +68,8 @@ export function createApp(deps: Deps) {
   api.route("/apps", pushRoutes(deps));
   api.route("/apps", telegramSettingsRoutes(deps));
   api.route("/apps", appearanceRoutes(deps));
+  api.route("/apps", integrationRoutes(deps));
+  api.route("/apps", automationRoutes(deps));
   api.route("/assets", assetRoutes(deps));
   api.route("/me", profilePhotoRoutes(deps));
   api.route("/conversations", conversationRoutes(deps));
@@ -76,6 +80,7 @@ export function createApp(deps: Deps) {
   const webhooks = new Hono();
   webhooks.use("*", limitBody(256));
   webhooks.route("/telegram", telegramWebhookRoutes(deps));
+  webhooks.route("/", providerWebhookRoutes(deps, { roots: deps.appStoreRoots }));
   app.route("/webhooks", webhooks);
 
   // SDK API: device access tokens (see routes/sdk.ts).
