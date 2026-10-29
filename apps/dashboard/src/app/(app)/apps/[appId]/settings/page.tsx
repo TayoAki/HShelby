@@ -198,6 +198,12 @@ export default function AppSettingsPage() {
           <TelegramSettingsCard app={app} admin={admin} />
           <ReviewsAndOffersCard app={app} admin={admin} onAppChange={setApp} />
           <PaywallsCard app={app} />
+          <SettingsCard title="AI replies">
+            <p>Claude answers your users from your docs a few seconds after they write, and hands over to your team when it should.</p>
+            <Link href={`/apps/${app.id}/ai`} className={`inline-flex items-center ${secondaryButton}`}>
+              Open AI replies
+            </Link>
+          </SettingsCard>
           <SettingsCard title="Automations">
             <p>Messages, offers and rating requests that go out on their own when someone declines a paywall, cancels a subscription and more.</p>
             <Link href={`/apps/${app.id}/automations`} className={`inline-flex items-center ${secondaryButton}`}>

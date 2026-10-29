@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "dependencies": {
+    "@anthropic-ai/sdk": "^1.3.0",
     "@better-auth/stripe": "^1.7.14",
     "@hono/node-server": "^2.1.5",
     "@hshelby/billing": "*",
@@ -43,6 +44,8 @@
     "migrate": "node dist/migrate.js",
     "migrate:dev": "tsx --env-file-if-exists=.env src/migrate.ts",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "eval": "tsx --env-file-if-exists=.env eval/run.ts",
+    "eval:export": "tsx --env-file-if-exists=.env eval/export.ts"
   }
 }

@@ -1,6 +1,6 @@
 import type { MessagePageQuery, StoredCard } from "@hshelby/contracts";
 import { uuidv7 } from "@hshelby/core";
-import { apps, conversations, messages, userPhotos, users, type Db, type Tx } from "@hshelby/db";
+import { aiSettings, apps, conversations, messages, userPhotos, users, type Db, type Tx } from "@hshelby/db";
 import { and, asc, count, desc, eq, gt, isNull, lt, sql } from "drizzle-orm";
 import { ApiError, isUniqueViolation, notFound } from "./errors";
 import type { Jobs } from "./jobs";
@@ -29,7 +29,7 @@ const live = (deviceId: string) => and(eq(conversations.deviceId, deviceId), isN
  */
 export async function appendUserMessage(
   db: Db,
-  jobs: Pick<Jobs, "notifyTeam">,
+  jobs: Pick<Jobs, "notifyTeam" | "considerAi">,
   input: { organizationId: string; appId: string; deviceId: string; clientId: string; text: string; attachmentIds: string[] },
   verifyAttachments: () => Promise<void> = async () => {},
 ): Promise<Appended> {
@@ -83,6 +83,10 @@ export async function appendUserMessage(
         .returning();
       await linkAttachments(tx, { messageId: message!.id, deviceId: input.deviceId, uploadedBy: "user", ids: input.attachmentIds });
       await jobs.notifyTeam(tx, message!.id);
+      if (conversation.aiState === "active") {
+        const [ai] = await tx.select({ enabled: aiSettings.enabled }).from(aiSettings).where(eq(aiSettings.appId, input.appId));
+        if (ai?.enabled) await jobs.considerAi(tx, { conversationId: conversation.id, messageId: message!.id });
+      }
       await publishLive(tx, {
         type: "message",
         organizationId: input.organizationId,
@@ -147,6 +151,7 @@ export async function appendAgentMessage(
   const replay = await findAgentReplay(db, input);
   if (replay) return replay;
   const source = input.source ?? "dashboard";
+  const teammate = source === "dashboard" || source === "telegram";
 
   try {
     return await db.transaction(async (tx) => {
@@ -157,9 +162,17 @@ export async function appendAgentMessage(
           lastMessageAt: sql`now()`,
           updatedAt: sql`now()`,
           unreadForUser: sql`${conversations.unreadForUser} + 1`,
-          // replying means the team has read the conversation
-          teamReadSeq: sql`${conversations.lastSeq} + 1`,
-          unreadForTeam: 0,
+          ...(teammate
+            ? {
+                // replying means the team has read the conversation (an automation's or the AI's message doesn't)
+                teamReadSeq: sql`${conversations.lastSeq} + 1`,
+                unreadForTeam: 0,
+                // and takes it over from the AI until someone hands it back (phase B11)
+                aiState: "paused" as const,
+                aiStateReason: null,
+                aiStateAt: sql`case when ${conversations.aiState} = 'paused' then ${conversations.aiStateAt} else now() end`,
+              }
+            : {}),
         })
         .where(
           and(

@@ -1,3 +1,4 @@
+import Anthropic from "@anthropic-ai/sdk";
 import { createAppStoreClient, parseKeyring } from "@hshelby/core";
 import { createDb } from "@hshelby/db";
 import { createApnsClient } from "@hshelby/push";
@@ -9,7 +10,7 @@ import { createAuth } from "./auth";
 import { createBilling } from "./billing";
 import type { Deps } from "./context";
 import { deriveDeviceTokenKey } from "./device-tokens";
-import { billingEnabled, type Env } from "./env";
+import { aiEnabled, billingEnabled, type Env } from "./env";
 import { createJobs } from "./jobs";
 
 function storageFromEnv(env: Env) {
@@ -19,7 +20,7 @@ function storageFromEnv(env: Env) {
 
 export function createDeps(
   env: Env,
-  overrides: Partial<Pick<Deps, "appStore" | "logger" | "apns" | "storage" | "appStoreRoots">> & { stripe?: Stripe } = {},
+  overrides: Partial<Pick<Deps, "appStore" | "logger" | "apns" | "storage" | "appStoreRoots" | "anthropic">> & { stripe?: Stripe } = {},
 ) {
   const logger =
     overrides.logger ??
@@ -36,11 +37,17 @@ export function createDeps(
     auth: createAuth({ db, env, logger, stripe, billing }),
     billing,
     deviceTokenKey: deriveDeviceTokenKey(env.BETTER_AUTH_SECRET),
-    jobs: createJobs(env.DATABASE_URL, logger),
+    jobs: createJobs(env.DATABASE_URL, logger, { aiDebounceMs: env.AI_DEBOUNCE_MS }),
     apns: overrides.apns ?? createApnsClient(),
     storage: overrides.storage !== undefined ? overrides.storage : storageFromEnv(env),
     telegram: createTelegramClient({ baseUrl: env.TELEGRAM_API_URL }),
     appStoreRoots: overrides.appStoreRoots,
+    anthropic:
+      overrides.anthropic !== undefined
+        ? overrides.anthropic
+        : aiEnabled(env)
+          ? new Anthropic({ apiKey: env.ANTHROPIC_API_KEY, baseURL: env.ANTHROPIC_BASE_URL, maxRetries: 3, timeout: 90_000 })
+          : null,
   };
   return { deps, pool };
 }

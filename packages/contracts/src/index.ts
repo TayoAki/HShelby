@@ -47,6 +47,7 @@ export const errorCodes = [
   "asset_in_use",
   "integration_not_connected",
   "invalid_signature",
+  "ai_unavailable",
   "internal_error",
 ] as const;
 export type ErrorCode = (typeof errorCodes)[number];
@@ -127,6 +128,7 @@ export type AppStoreResult = z.infer<typeof AppStoreResult>;
 export const AppStoreSearch = z.object({ results: z.array(AppStoreResult) });
 export type AppStoreSearch = z.infer<typeof AppStoreSearch>;
 
+export * from "./ai";
 export * from "./appearance";
 export * from "./automations";
 export * from "./billing";

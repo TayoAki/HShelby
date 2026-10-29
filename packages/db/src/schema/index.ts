@@ -7,3 +7,4 @@ export * from "./cards";
 export * from "./telegram";
 export * from "./appearance";
 export * from "./automations";
+export * from "./ai";

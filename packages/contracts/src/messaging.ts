@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { AiConversation } from "./ai";
 import { LocalAppearance } from "./appearance";
 import { DeviceSubscription } from "./subscriptions";
 import { InboxCard, MessageKind, ReportedPaywall, ReportedPaywalls, SdkCard } from "./cards";
@@ -122,6 +123,8 @@ export const SdkMessage = z.object({
    * temporary photo link with "Show team photos" (and the initial when there's no photo). Null otherwise.
    */
   author: z.object({ name: z.string().nullable(), initial: z.string().nullable(), photoUrl: z.string().nullable() }).nullable(),
+  /** Written by the AI (phase B11), so the chat can label it. */
+  byAi: z.boolean(),
   /** Set on the device's own messages, so the SDK can match them to its pending sends. */
   clientId: z.string().nullable(),
   attachments: z.array(Attachment),
@@ -209,6 +212,8 @@ export const InboxConversation = z.object({
   lastMessage: z.object({ sender: MessageSender, text: z.string() }).nullable(),
   /** The app's setup conversation (its first, from the developer's test device): replies work here without a subscription. */
   setup: z.boolean(),
+  /** Whether the AI answers here (phase B11); null when the app's AI replies are off. */
+  ai: AiConversation.nullable(),
 });
 export type InboxConversation = z.infer<typeof InboxConversation>;
 

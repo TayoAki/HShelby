@@ -25,6 +25,7 @@ import { appAppearance, apps, attachments, automations, conversations, devices, 
 import { and, count, eq, gt, isNull, ne, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import type { Deps, SdkEnv } from "../context";
+import { getAiSettings } from "../ai/consider";
 import { onEvent } from "../automations/engine";
 import { recordAppPaywalls, recordClick, toSdkCard } from "../cards";
 import { hashDeviceSecret, signAccessToken } from "../device-tokens";
@@ -62,6 +63,11 @@ type Author = SdkMessage["author"];
 async function authorsOf(deps: Deps, app: SdkApp, page: (MessageRow & Partial<Pick<PagedMessage, "authorName" | "authorPhotoKey">>)[]) {
   const authors = new Map<string, Author>();
   if (!app.showTeamNames && !app.showTeamPhotos) return authors;
+  if (page.some((m) => m.source === "ai")) {
+    // the AI's messages carry the name the team gave it (phase B11)
+    const { name } = await getAiSettings(deps.db, app.id);
+    authors.set(AI_AUTHOR, { name: app.showTeamNames ? name : null, initial: app.showTeamPhotos ? (Array.from(name)[0]?.toUpperCase() ?? null) : null, photoUrl: null });
+  }
   for (const m of page) {
     if (m.sender !== "agent" || !m.authorUserId || !m.authorName || authors.has(m.authorUserId)) continue;
     const firstName = m.authorName.split(" ")[0] ?? m.authorName;
@@ -76,6 +82,9 @@ async function authorsOf(deps: Deps, app: SdkApp, page: (MessageRow & Partial<Pi
   return authors;
 }
 
+/** The authors map's key for the AI. */
+const AI_AUTHOR = "ai";
+
 const toSdkMessage = (m: MessageRow, attachmentsOf: Map<string, Attachment[]>, appStoreId: string | null, authors = new Map<string, Author>()): SdkMessage => ({
   id: m.id,
   seq: m.seq,
@@ -84,7 +93,8 @@ const toSdkMessage = (m: MessageRow, attachmentsOf: Map<string, Attachment[]>, a
   text: m.text,
   card: toSdkCard(m.card, appStoreId),
   actionClickedAt: m.actionClickedAt?.toISOString() ?? null,
-  author: (m.authorUserId && authors.get(m.authorUserId)) || null,
+  author: (m.source === "ai" ? authors.get(AI_AUTHOR) : m.authorUserId && authors.get(m.authorUserId)) || null,
+  byAi: m.source === "ai",
   // only the device's own client IDs; a teammate's are none of its business
   clientId: m.sender === "user" ? m.clientId : null,
   attachments: attachmentsOf.get(m.id) ?? [],

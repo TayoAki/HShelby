@@ -27,7 +27,7 @@ Why one Postgres for everything at the start: messages, the job queue, realtime 
 
 ## Status
 
-**B0–B10 run on Railway staging** (billing is switched off there until the Stripe test secret key is set) (project `hshelby`, environment `staging`): dashboard at `https://dashboard-staging-0dee.up.railway.app`, API at `https://api-staging-f8f8.up.railway.app`.
+**B0–B11 run on Railway staging** (billing is switched off there until the Stripe test secret key is set, and AI replies until `ANTHROPIC_API_KEY` is) (project `hshelby`, environment `staging`): dashboard at `https://dashboard-staging-0dee.up.railway.app`, API at `https://api-staging-f8f8.up.railway.app`.
 
 B1 (messaging core) as built:
 
@@ -161,6 +161,22 @@ B10 (subscriptions and automations) as built:
 - **Simulator:** `--track event` (or `/track event` in `--chat`), `--storekit-tx ID`, `--paying`.
 - **Done-when tests:** `packages/subscriptions/test` replays every provider's fixture set to the expected canonical events (56 cases, plus signature refusals); `apps/api/test/automations.test.ts` sends a real RevenueCat cancellation for people in Los Angeles, Berlin and Tokyo and checks each run (and its job) is due at 10:00 the next day in their zone (17:00, 09:00 and 01:00 UTC), then sends the offer. The same files cover the receivers, matching, dedupe, audiences, suppression, holds, waits and re-checks, exactly-once steps, results and permissions.
 - **Not checked here:** real deliveries from the providers (they need accounts and live webhooks); everything is tested against their documented payload shapes.
+- **Checked on staging:** a RevenueCat cancellation webhook reached the person's app as an automation message 1.35 s later; a tracked `paywall_declined` answered `{sent: true, openChat: true}`.
+
+B11 (AI replies) as built:
+
+- **Model:** Claude Opus 5.5 (`claude-opus-5-5`) through `@anthropic-ai/sdk`'s tool runner, `output_config: {effort: "low"}`, `max_tokens` 16,000 (thinking is always on and counts toward it), at most 4 model calls per turn. Server-side fallbacks are on (`fallbacks: "default"`, beta `server-side-fallback-2026-07-01`): when Opus declines, Anthropic's recommended fallback model answers in the same call, and the run records that it did. The runner sends the whole turn each time (`thread: false`), so no conversation is kept on Anthropic's side.
+- **Prompt** (`apps/api/src/ai/prompt.ts`): the tools and a system prompt of rules, the team's instructions and the app's docs, marked for prompt caching, so every conversation of an app reads the docs at the cached rate. The user turn carries the person (name, locale, local time, app and iOS version, subscription, the offers their device can show, whether a rating request is available) and the latest 30 messages, labelled by who wrote them (photos and cards as placeholders), as data, not instructions.
+- **Tools** (`apps/api/src/ai/assistant.ts`, `strict: true`, `tool_choice` auto): `reply(text)`, `send_offer(paywall_id, text)`, `ask_review(text)`, `handover(reason, message)`. Guardrails live in their code: an offer must be a paywall the person's device reported it can show; a rating request needs the App Store ID and nobody asked in the last 120 days, plus the cards' repeat guard; nothing may promise a refund (English phrasings, a backstop for the prompt's rule); a turn sends at most one message (reply and handover can go together). A refused call goes back to the model as the tool's error, so it can choose again, and is listed in the run's notes. Apps can turn offers and rating requests off; their tools are then left out.
+- **`ai.consider`** (`apps/api/src/ai/consider.ts`, worked in the API process): each person's message schedules a job 8 s later (`AI_DEBOUNCE_MS`), keyed by message; a job whose message is no longer the latest steps aside, so a burst gets one answer, to its last message. A conversation the AI isn't answering, a blocked person, an app with AI off or without a subscription, and a message someone already answered are skipped. While the model thinks, the app shows "Assistant is typing…".
+- **No double replies:** every message the AI sends re-checks, inside the send's transaction with the conversation row locked, that the AI still has the conversation and that nothing came after the person's message except this turn's own messages. A teammate's reply (dashboard or Telegram) sets the conversation to `paused` in its own append, so whichever commits first wins and the other stops; a newer message from the person stops the turn too (its own job answers). The tests reply as a teammate while the fake model is "thinking" and check only the teammate's reply went out.
+- **Handover:** the conversation becomes `handed_over` with the reason; Telegram gets a post with sound, under the person's latest notification (replying to it answers the person). A refusal by the model and its fallback, a failing model service (after the SDK's 3 retries), a turn with no tool call, and the 31st AI message in a day hand over too. The AI stays out of a paused or handed-over conversation until a teammate hands it back (`POST /api/conversations/:id/ai {state}`; handing back answers the waiting message right away) or resolves it.
+- **Messages** are `source: ai`: unread for the team (the AI answering doesn't mark the conversation read), pushed like a reply, mirrored silently to Telegram as "AI". The SDK gets `byAi: true` and, with "Show team names", the AI's name as the author.
+- **API** (`/api/apps/:id/ai`): settings (on/off, name, instructions up to 4,000 characters, docs up to 200,000, offers, rating requests; admins; turning on needs the server's key, `ai_unavailable` otherwise; switching and knowledge changes are audited), `POST …/ai/preview` (admins: what the AI would do with a made-up message or a real conversation, with unsaved settings, sending nothing), `GET …/ai/runs` (the last 50: outcome, what it sent, refusals, fallback, tokens, latency) and 30-day totals.
+- **Dashboard:** an AI replies page (switch, knowledge, Try it, recent answers with a rough cost), a link on the app's settings, and in the inbox a banner with Pause AI / Hand back to AI, "AI ·" on its messages and "Assistant (AI) is typing…".
+- **Eval** (`apps/api/eval`): 24 labelled cases for a made-up app (how-tos, restore, cancel, angry refund demands, asking for a human, offers with and without a paywall, rating requests with and without a recent ask, a crash report, questions the docs don't answer, Spanish, a prompt injection, account deletion, "are you a bot", a burst, a photo, offers switched off), graded in code (the choice, regexes the answer must and mustn't match, the offered paywall). `ANTHROPIC_API_KEY=… npm run eval -w @hshelby/api` runs it against the real model (24 model calls, well under a dollar) and fails under 90%. `npm run eval:export -w @hshelby/api -- --app <UUID>` turns an app's resolved conversations into cases with the team's answer as the reference (git-ignored: real people's messages), to label and add.
+- **Tests:** `apps/api/test/ai.test.ts` against a fake Messages API (`test/fake-anthropic.ts`): the request shape (model, effort, fallbacks beta, strict tools, cached system), the debounce, pausing and handing back, both double-reply races, retries, each guardrail, refusals, a fallback answer, service failures and the preview. `telegram.test.ts` covers the handover post.
+- **Not checked here:** the real model. There's no `ANTHROPIC_API_KEY` in this environment or on staging yet, so the eval hasn't been run; set the key and run it before turning AI replies on for an app. Before production, add Anthropic to the DPA's subprocessor list.
 
 Where B0 differs from the plan below:
 
@@ -172,7 +188,7 @@ Railway layout:
 
 | Service | Build / start | Notes |
 |---|---|---|
-| `api` | `npm run build -w @hshelby/api` / `npm run start -w @hshelby/api` | Pre-deploy `npm run migrate -w @hshelby/api`; healthcheck `/health` (runs `select 1`). Also works the `automation.event` and `automation.step` queues. |
+| `api` | `npm run build -w @hshelby/api` / `npm run start -w @hshelby/api` | Pre-deploy `npm run migrate -w @hshelby/api`; healthcheck `/health` (runs `select 1`). Also works the `automation.event`, `automation.step` and `ai.consider` queues. |
 | `worker` | same with `@hshelby/worker` | pg-boss: `push.send`, `team.notify` and `telegram.send`, nightly cleanup at 03:00 UTC, deleted-app purge every 15 minutes, unsent-upload sweep and `billing.sync` hourly. |
 | `dashboard` | same with `@hshelby/dashboard` | Healthcheck `/health`. Proxies `/api/*` to the API over the private network, so auth cookies are first-party. |
 | `Postgres` | Railway template | |
@@ -193,6 +209,7 @@ Variables (secrets are set in Railway only, never in the repo):
 | worker | `DATABASE_URL` | `${{Postgres.DATABASE_URL}}` |
 | worker | `ENC_KEYS` | `${{api.ENC_KEYS}}` (decrypts apps' APNs keys) |
 | worker | `STRIPE_SECRET_KEY` | `${{api.STRIPE_SECRET_KEY}}` (billing sync; optional) |
+| api | `ANTHROPIC_API_KEY` | Claude API key for AI replies (apps can't turn them on without it); `AI_DEBOUNCE_MS` optional (default 8000) |
 | api, worker | `TELEGRAM_CHAT_INTERVAL_MS` | Optional: minimum gap between posts in one Telegram chat (default 3000) |
 | api, worker | `S3_ENDPOINT`, `S3_REGION`, `S3_BUCKET`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY` | `${{photos.ENDPOINT}}`, `${{photos.REGION}}`, `${{photos.BUCKET}}`, `${{photos.ACCESS_KEY_ID}}`, `${{photos.SECRET_ACCESS_KEY}}` (photos are off without them) |
 | dashboard | `API_INTERNAL_URL` | `http://${{api.RAILWAY_PRIVATE_DOMAIN}}:${{api.PORT}}`, read at build time |
@@ -498,7 +515,7 @@ Each phase ends with acceptance tests that must pass in CI and on staging.
 | **B8 Telegram** (done, see Status) | Connect bot, notify, reply mapping, reactions, supergroup migration, throttle | Replying in Telegram lands in the app chat; 50 bursts respect the per-chat limit | 1.5 wks |
 | **B9 Appearance & assets** (done, see Status) | Draft/publish remote appearance, asset library (PNG ≤ 512 px), team photos | SDK fetches the published version; drafts never leak | 1 wk |
 | **B10 Subscriptions + automations** (done, see Status) | Four provider receivers, normalization, matching, automation builder API, run engine with waits, suppression, holds, results | Replaying each provider's fixture set yields the expected canonical events; a "cancelled → offer tomorrow 10:00 local" run fires at the right UTC time across 3 time zones | 3 wks |
-| **B11 AI replies** | See §11 | Eval set passes the bar you set; handover never double-replies | 2–3 wks |
+| **B11 AI replies** (built; real-model eval pending, see Status) | See §11 | Eval set passes the bar you set; handover never double-replies | 2–3 wks |
 | **B12 Hardening** | Load test, Redis if needed, audit log, restore drill | 1,000 polling devices + 50 msgs/s holds p95 < 150 ms on staging | 1 wk |
 
 **Totals:** MVP backend ≈ 6–7 weeks; parity without AI ≈ 4 months; with AI ≈ 4.5 months. These are backend-only numbers; the full-product estimates in the teardown (§7.2) add the SDK, React Native wrapper and dashboard UI.
@@ -524,7 +541,7 @@ Each phase ends with acceptance tests that must pass in CI and on staging.
 
 ## 11. AI replies (phase B11)
 
-Reception markets this but its legal docs say it isn't live yet, so it's a chance to ship it first.
+Reception markets this but its legal docs say it isn't live yet, so it's a chance to ship it first. Built as described below; see Status for the details and what's still to check.
 
 - **Model:** Claude Opus 5.5 (`claude-opus-5-5`) through `@anthropic-ai/sdk`. Thinking can't be turned off on this model; control cost and latency with `output_config: { effort: "low" }` (or `"medium"`, the default) for chat replies. Pricing at the time of writing: $4 / $20 per million input / output tokens, cached reads $0.20. Evaluate a cheaper model later if the bill matters; that's a measured trade-off, not a default.
 - **Knowledge without a vector database at first.** A typical indie app's help docs are small. Put the app's docs in the system prompt and mark them with prompt caching, so every reply re-reads them at the cached rate. Only once docs outgrow that (hundreds of thousands of tokens) add retrieval: pgvector in the same Postgres plus an embeddings provider. Anthropic doesn't offer an embeddings model; Voyage AI is the usual pairing.

@@ -184,7 +184,7 @@ const print = (m: SdkMessage) => {
   const photos = m.attachments.map((a) => `[photo ${a.width}×${a.height}]`).join(" ");
   if (m.card) lastCard = m;
   const tapped = m.actionClickedAt ? "(tapped)" : "";
-  console.log(`${m.sender === "user" ? "  you" : " team"} │ ${[photos, m.text, cardButton(m), tapped].filter(Boolean).join(" ")}`);
+  console.log(`${m.sender === "user" ? "  you" : m.byAi ? "   AI" : " team"} │ ${[photos, m.text, cardButton(m), tapped].filter(Boolean).join(" ")}`);
 };
 
 /** What the SDK does on a card tap: open the review page or the paywall, and send the click receipt. */

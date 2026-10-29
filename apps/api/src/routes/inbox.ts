@@ -1,4 +1,5 @@
 import {
+  AiStateInput,
   InboxListQuery,
   isInChat,
   MessagePageQuery,
@@ -12,7 +13,7 @@ import {
   type InboxMessage,
 } from "@hshelby/contracts";
 import { uuidv7 } from "@hshelby/core";
-import { apps, attachments, auditEvents, conversations, devices, messages } from "@hshelby/db";
+import { aiSettings, apps, attachments, auditEvents, conversations, devices, messages } from "@hshelby/db";
 import { and, desc, eq, ilike, inArray, isNull, or, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import type { AppEnv, Deps } from "../context";
@@ -112,9 +113,11 @@ export function conversationRoutes(deps: Deps) {
         lastCard: messages.card,
         setupConversationId: apps.setupConversationId,
         appStoreId: apps.appStoreId,
+        aiEnabled: aiSettings.enabled,
       })
       .from(conversations)
       .innerJoin(apps, and(eq(apps.id, conversations.appId), isNull(apps.deletedAt)))
+      .leftJoin(aiSettings, eq(aiSettings.appId, conversations.appId))
       .innerJoin(devices, eq(devices.id, conversations.deviceId))
       .leftJoin(messages, and(eq(messages.conversationId, conversations.id), eq(messages.seq, conversations.lastSeq)));
 
@@ -134,6 +137,9 @@ export function conversationRoutes(deps: Deps) {
         ? { sender: row.lastSender, text: messagePreview({ text: row.lastText, kind: row.lastKind, card: row.lastCard }) }
         : null,
     setup: row.setupConversationId === row.conversation.id,
+    ai: row.aiEnabled
+      ? { state: row.conversation.aiState, reason: row.conversation.aiStateReason, at: row.conversation.aiStateAt?.toISOString() ?? null }
+      : null,
   });
 
   async function findConversation(orgId: string, id: string) {
@@ -294,6 +300,32 @@ export function conversationRoutes(deps: Deps) {
     return c.json({ unreadForTeam: conversation.unreadForTeam });
   });
 
+  /**
+   * Hands the conversation back to the AI, or pauses it. Handing back with the person's message unanswered
+   * asks the AI to answer it now.
+   */
+  r.post("/:id/ai", async (c) => {
+    const { state } = await parseJson(c, AiStateInput);
+    const row = await findConversation(c.get("org").id, c.req.param("id"));
+    await db.transaction(async (tx) => {
+      const [conversation] = await tx
+        .update(conversations)
+        .set({ aiState: state, aiStateReason: null, aiStateAt: new Date(), updatedAt: new Date() })
+        .where(eq(conversations.id, row.conversation.id))
+        .returning();
+      if (state === "active") {
+        const [last] = await tx
+          .select({ id: messages.id, sender: messages.sender })
+          .from(messages)
+          .where(and(eq(messages.conversationId, conversation!.id), eq(messages.seq, conversation!.lastSeq)));
+        const [ai] = await tx.select({ enabled: aiSettings.enabled }).from(aiSettings).where(eq(aiSettings.appId, conversation!.appId));
+        if (last?.sender === "user" && ai?.enabled) await deps.jobs.considerAi(tx, { conversationId: conversation!.id, messageId: last.id }, 0);
+      }
+      await publishLive(tx, { type: "conversation", organizationId: c.get("org").id, conversationId: conversation!.id, deviceId: conversation!.deviceId });
+    });
+    return c.json({ conversation: toInboxConversation(await findConversation(c.get("org").id, row.conversation.id)) });
+  });
+
   for (const [action, status] of [
     ["resolve", "closed"],
     ["reopen", "open"],
@@ -303,7 +335,8 @@ export function conversationRoutes(deps: Deps) {
       const [row] = isUuid(id)
         ? await db
             .update(conversations)
-            .set({ status, updatedAt: new Date() })
+            // resolving ends a teammate's takeover: the person's next message goes to the AI first again
+            .set(status === "closed" ? { status, updatedAt: new Date(), aiState: "active", aiStateReason: null, aiStateAt: new Date() } : { status, updatedAt: new Date() })
             .where(and(eq(conversations.id, id), eq(conversations.organizationId, c.get("org").id)))
             .returning({ status: conversations.status, deviceId: conversations.deviceId })
         : [];

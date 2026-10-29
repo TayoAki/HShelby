@@ -97,7 +97,7 @@ export function Thread({ conversationId }: { conversationId: string }) {
   const restoreFromHeight = useRef<number | null>(null);
   const live = useLiveConnected();
   /** Who's typing in this conversation right now: the user, or another teammate. */
-  const [typing, setTyping] = useState<{ label: string; until: number } | null>(null);
+  const [typing, setTyping] = useState<{ label: string; until: number; ai?: boolean } | null>(null);
   const lastTypingSent = useRef(0);
   const [cardDialog, setCardDialog] = useState<"review" | "paywall" | null>(null);
 
@@ -139,7 +139,8 @@ export function Thread({ conversationId }: { conversationId: string }) {
     if (event.type === "ready" || event.type === "resync") return catchUp(true);
     if (event.conversationId !== conversationId) return;
     if (event.type === "message") {
-      if (event.sender === "user") setTyping(null);
+      // the typer's message arrived: the person's, or the AI's (it has no other way to stop typing)
+      if (event.sender === "user" || typing?.ai) setTyping(null);
       catchUp();
     } else if (event.type === "conversation") {
       void reloadConversation();
@@ -153,8 +154,9 @@ export function Thread({ conversationId }: { conversationId: string }) {
         c && { ...c, device: { ...c.device, inChat: event.inChat, lastSeenInChatAt: new Date().toISOString() } },
       );
     } else if (event.type === "typing" && conversation) {
-      const who = event.sender === "user" ? deviceLabel(conversation.device) : (event.name ?? "A teammate");
-      setTyping({ label: `${who} is typing…`, until: Date.now() + TYPING_TTL_MS });
+      // a teammate types with their user ID; the AI has none
+      const who = event.sender === "user" ? deviceLabel(conversation.device) : event.userId ? (event.name ?? "A teammate") : `${event.name ?? "The AI"} (AI)`;
+      setTyping({ label: `${who} is typing…`, until: Date.now() + TYPING_TTL_MS, ai: event.sender === "agent" && !event.userId });
     }
   });
   useEffect(() => {
@@ -297,6 +299,16 @@ export function Thread({ conversationId }: { conversationId: string }) {
     }
   }
 
+  /** Hands the conversation back to the AI, or pauses it here. */
+  async function setAi(state: "active" | "paused") {
+    try {
+      const { conversation: updated } = await api<{ conversation: InboxConversation }>(`${base}/ai`, { method: "POST", body: JSON.stringify({ state }) });
+      setConversation(updated);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Couldn't change the AI for this conversation");
+    }
+  }
+
   async function setBlocked(blocked: boolean) {
     if (!conversation) return;
     if (blocked && !window.confirm("Block this user? They can still read the conversation but can't send messages.")) return;
@@ -435,6 +447,8 @@ export function Thread({ conversationId }: { conversationId: string }) {
                       <>
                         {agent && m.author && `${m.author.name.split(" ")[0]} · `}
                         {agent && m.source === "telegram" && "via Telegram · "}
+                        {agent && m.source === "ai" && "AI · "}
+                        {agent && m.source === "automation" && "Automation · "}
                         {clockTime(m.createdAt)}
                       </>
                     )}
@@ -452,6 +466,18 @@ export function Thread({ conversationId }: { conversationId: string }) {
           <div className="px-5 pb-2">
             <ErrorNote>{error}</ErrorNote>
           </div>
+        )}
+        {conversation.ai && (
+          <p
+            className={`mx-5 mb-2 rounded-2xl px-4 py-3 text-[13px] ${conversation.ai.state === "handed_over" ? "bg-[#fff7e6] text-[#8a5a00]" : "bg-panel text-secondary"}`}
+          >
+            {conversation.ai.state === "active" && "The AI answers this conversation; your reply takes it over. "}
+            {conversation.ai.state === "paused" && "The AI is paused here until someone hands it back or resolves the conversation. "}
+            {conversation.ai.state === "handed_over" && `The AI handed this over${conversation.ai.reason ? `: ${conversation.ai.reason}` : "."} `}
+            <button type="button" onClick={() => setAi(conversation.ai!.state === "active" ? "paused" : "active")} className="text-fg underline underline-offset-2">
+              {conversation.ai.state === "active" ? "Pause AI" : "Hand back to AI"}
+            </button>
+          </p>
         )}
         {device.signedOutAt && (
           <p className="mx-5 mb-2 rounded-2xl bg-panel px-4 py-3 text-[13px] text-secondary">

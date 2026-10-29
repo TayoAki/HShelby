@@ -23,12 +23,17 @@ const AUTOMATION_QUEUE_OPTIONS = { retryLimit: 3, retryDelay: 10, retryBackoff: 
 export type AutomationEventJob = { appId: string; deviceIds: string[]; event: string };
 export type AutomationStepJob = { runId: string };
 
+/** A person's message the AI may answer (phase B11), a few seconds after it, so a burst gets one answer. */
+export const AI_CONSIDER_QUEUE = "ai.consider";
+const AI_QUEUE_OPTIONS = { retryLimit: 2, retryDelay: 5, retryBackoff: true, notify: true } as const;
+export type AiConsiderJob = { conversationId: string; messageId: string };
+
 /**
  * Background work. The API enqueues push, Telegram and team notifications for the worker, which talks to those
  * services. Automation jobs only write messages through the same code as replies, so the API process runs them
  * (`workAutomations`, started by the server, not by tests).
  */
-export function createJobs(connectionString: string, logger: Logger) {
+export function createJobs(connectionString: string, logger: Logger, { aiDebounceMs = 8000 }: { aiDebounceMs?: number } = {}) {
   const boss = new PgBoss({ connectionString, schema: "pgboss", supervise: false, schedule: false, max: 3 });
   boss.on("error", (err) => logger.error({ err }, "pg-boss error"));
   return {
@@ -39,6 +44,7 @@ export function createJobs(connectionString: string, logger: Logger) {
       await boss.createQueue(TELEGRAM_QUEUE, TELEGRAM_QUEUE_OPTIONS);
       await boss.createQueue(AUTOMATION_EVENT_QUEUE, AUTOMATION_QUEUE_OPTIONS);
       await boss.createQueue(AUTOMATION_STEP_QUEUE, AUTOMATION_QUEUE_OPTIONS);
+      await boss.createQueue(AI_CONSIDER_QUEUE, AI_QUEUE_OPTIONS);
     },
     stop: () => boss.stop({ graceful: false }),
     /** Runs inside the reply's transaction, so a rolled-back message never notifies anyone. */
@@ -64,6 +70,22 @@ export function createJobs(connectionString: string, logger: Logger) {
       const job: AutomationStepJob = { runId };
       await boss.send(AUTOMATION_STEP_QUEUE, job, { db: fromDrizzle(tx, sql), startAfter, singletonKey: `${runId}:${startAfter.getTime()}` });
     },
+    /**
+     * In the person's message's transaction. Every message schedules its own job; the job for an earlier
+     * message finds a newer one and steps aside, so only the last of a burst is answered (a trailing debounce).
+     */
+    async considerAi(tx: Db | Tx, job: AiConsiderJob, delayMs = aiDebounceMs) {
+      await boss.send(AI_CONSIDER_QUEUE, job, {
+        db: fromDrizzle(tx, sql),
+        startAfter: new Date(Date.now() + delayMs),
+        singletonKey: job.messageId,
+      });
+    },
+    /** Tells the team's Telegram that the AI handed a conversation over, under the person's message. */
+    async notifyHandover(tx: Db | Tx, messageId: string, reason: string) {
+      const job: TeamNotifyJob = { messageId, handover: reason };
+      await boss.send(TEAM_NOTIFY_QUEUE, job, { db: fromDrizzle(tx, sql), singletonKey: `handover:${messageId}` });
+    },
     /** Works the automation queues in this process, one job at a time per batch entry, each settled alone. */
     async workAutomations(handlers: { event: (job: AutomationEventJob) => Promise<unknown>; step: (job: AutomationStepJob) => Promise<unknown> }) {
       const each =
@@ -84,6 +106,25 @@ export function createJobs(connectionString: string, logger: Logger) {
       const options = { batchSize: 10, burstWhenBatchFull: true, perJobResults: true, pollingIntervalSeconds: 5, notifyPollingIntervalSeconds: 10 } as const;
       await boss.work(AUTOMATION_EVENT_QUEUE, options, each(handlers.event));
       await boss.work(AUTOMATION_STEP_QUEUE, options, each(handlers.step));
+    },
+    /** Works ai.consider in this process: several conversations at once, each job settled alone. */
+    async workAi(handle: (job: AiConsiderJob) => Promise<unknown>) {
+      // jobs come due after the debounce without a NOTIFY, so poll every second
+      await boss.work<AiConsiderJob>(
+        AI_CONSIDER_QUEUE,
+        { batchSize: 5, burstWhenBatchFull: true, perJobResults: true, pollingIntervalSeconds: 1 },
+        async (jobs): Promise<JobResult[]> =>
+          Promise.all(
+            jobs.map(async (job): Promise<JobResult> => {
+              try {
+                return { id: job.id, status: "completed", output: await handle(job.data) };
+              } catch (err) {
+                logger.warn({ err, jobId: job.id }, "ai job failed");
+                return { id: job.id, status: "failed", output: { message: err instanceof Error ? err.message : String(err) } };
+              }
+            }),
+          ),
+      );
     },
   };
 }

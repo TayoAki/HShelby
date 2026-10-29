@@ -1,3 +1,4 @@
+import type Anthropic from "@anthropic-ai/sdk";
 import type { AppStoreClient, Keyring } from "@hshelby/core";
 import type { Db, devices } from "@hshelby/db";
 import type { ApnsClient } from "@hshelby/push";
@@ -28,6 +29,8 @@ export type Deps = {
   telegram: TelegramClient;
   /** Roots trusted for App Store notifications: Apple's unless a test passes its own. */
   appStoreRoots?: string[];
+  /** Claude for AI replies; null without ANTHROPIC_API_KEY. */
+  anthropic: Anthropic | null;
 };
 
 type SessionResult = NonNullable<Awaited<ReturnType<Auth["api"]["getSession"]>>>;

@@ -31,5 +31,10 @@ export function mirrorHtml(m: Body & { senderName: string }) {
   return `<b>${escapeHtml(m.senderName)}</b>: ${body(m)}`;
 }
 
+/** The AI asked for a teammate (phase B11): posted with sound, under the customer's latest notification. */
+export function handoverHtml(reason: string) {
+  return `🙋 <b>Handed over by AI</b>: ${escapeHtml(clip(reason, TEXT_MAX))}`;
+}
+
 /** "App · User", the forum topic for one customer. */
 export const topicName = (appName: string, userLabel: string) => clip(`${appName} · ${userLabel}`, TOPIC_NAME_MAX);

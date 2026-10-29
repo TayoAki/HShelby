@@ -26,3 +26,6 @@ npm-debug.log*
 
 # apps/api/scripts/sdk-sim.ts device state
 .sdk-sim/
+
+# exported real conversations for the AI eval (apps/api/eval/export.ts)
+apps/api/eval/cases.*.json

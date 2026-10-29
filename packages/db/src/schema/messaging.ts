@@ -1,4 +1,4 @@
-import type { DeviceSubscription, ReportedPaywall, StoredCard } from "@hshelby/contracts";
+import type { AiState, DeviceSubscription, ReportedPaywall, StoredCard } from "@hshelby/contracts";
 import { sql } from "drizzle-orm";
 import { bigint, boolean, index, integer, jsonb, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 import { apps } from "./apps";
@@ -115,6 +115,14 @@ export const conversations = pgTable(
      * conversations the person engaged in (phase B10).
      */
     userEngaged: boolean("user_engaged").notNull().default(true),
+    /**
+     * Whether the AI answers here (phase B11): `paused` after a teammate's reply, `handed_over` when the AI asked
+     * for a teammate. Back to `active` when a teammate hands it back or resolves the conversation.
+     */
+    aiState: text("ai_state").$type<AiState>().notNull().default("active"),
+    /** The AI's reason for a handover. */
+    aiStateReason: text("ai_state_reason"),
+    aiStateAt: ts("ai_state_at"),
     createdAt: ts("created_at").notNull().defaultNow(),
     updatedAt: ts("updated_at").notNull().defaultNow(),
   },

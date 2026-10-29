@@ -7,6 +7,7 @@ import type { AppEnv, Deps, SdkEnv } from "./context";
 import { ApiError } from "./errors";
 import { requireOrg, requireSession } from "./middleware";
 import { accountRoutes } from "./routes/account";
+import { aiRoutes } from "./routes/ai";
 import { appearanceRoutes, assetRoutes, profilePhotoRoutes, publicAppearanceRoutes } from "./routes/appearance";
 import { appRoutes } from "./routes/apps";
 import { automationRoutes } from "./routes/automations";
@@ -54,9 +55,10 @@ export function createApp(deps: Deps) {
 
   // Dashboard API: Better Auth session cookie, scoped to the active organization.
   const api = new Hono<AppEnv>();
-  // JSON bodies stay small; uploads get room for the file plus multipart overhead
+  // JSON bodies stay small; uploads get room for the file plus multipart overhead, AI settings for the app's docs
   const uploads: [RegExp, ReturnType<typeof limitBody>][] = [
     [/^\/api\/conversations\/[^/]+\/attachments$/, limitBody(1100)],
+    [/^\/api\/apps\/[^/]+\/ai(\/preview)?$/, limitBody(1000)],
     [/^\/api\/assets$/, limitBody(2100)],
     [/^\/api\/me\/photo$/, limitBody(5200)],
   ];
@@ -70,6 +72,7 @@ export function createApp(deps: Deps) {
   api.route("/apps", appearanceRoutes(deps));
   api.route("/apps", integrationRoutes(deps));
   api.route("/apps", automationRoutes(deps));
+  api.route("/apps", aiRoutes(deps));
   api.route("/assets", assetRoutes(deps));
   api.route("/me", profilePhotoRoutes(deps));
   api.route("/conversations", conversationRoutes(deps));

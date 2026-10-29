@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any -- response bodies are asserted on, not typed */
 import { randomUUID } from "node:crypto";
-import { devices, telegramBots } from "@hshelby/db";
+import { conversations, devices, telegramBots } from "@hshelby/db";
 import { scheduleNotify, sendTelegramJob, TEAM_NOTIFY_QUEUE, TELEGRAM_QUEUE, type TeamNotifyJob, type TelegramJob } from "@hshelby/telegram";
 import { startFakeTelegram } from "@hshelby/telegram/testing";
 import { eq } from "drizzle-orm";
@@ -29,7 +29,7 @@ async function drain() {
   for (let round = 0; round < 50; round++) {
     const notify = await boss.fetch<TeamNotifyJob>(TEAM_NOTIFY_QUEUE, { batchSize: 500 });
     for (const job of notify) {
-      await scheduleNotify(deps.db, job.data.messageId, (next, startAfter, singletonKey) => boss.send(TELEGRAM_QUEUE, next, { startAfter, singletonKey }), 0);
+      await scheduleNotify(deps.db, job.data, (next, startAfter, singletonKey) => boss.send(TELEGRAM_QUEUE, next, { startAfter, singletonKey }), 0);
     }
     if (notify.length) await boss.complete(TEAM_NOTIFY_QUEUE, notify.map((j) => j.id));
     const sends = await boss.fetch<TelegramJob>(TELEGRAM_QUEUE, { batchSize: 500 });
@@ -156,6 +156,22 @@ describe("notifications", () => {
     await drain();
     const mirror = fake.sentTo(chatId).at(-1)!;
     expect(mirror).toMatchObject({ text: "<b>Ada</b>: Pull down to refresh.", silent: true, reply_to_message: { message_id: notification.message_id } });
+  });
+
+  it("announces an AI handover out loud; a Reply to it answers the person and keeps the AI out", async () => {
+    const { team, chatId, conversationId, notification, post, thread } = await connected();
+    const [question] = await thread();
+    await deps.jobs.notifyHandover(deps.db, question.id, "Wants a refund");
+    await drain();
+    const handover = fake.sentTo(chatId).at(-1)!;
+    expect(handover).toMatchObject({ text: "🙋 <b>Handed over by AI</b>: Wants a refund", silent: false, reply_to_message: { message_id: notification.message_id } });
+
+    await post({ text: "I'll sort it out", reply_to_message: { message_id: handover.message_id } });
+    expect((await thread()).at(-1)).toMatchObject({ source: "telegram", text: "I'll sort it out" });
+    const { conversation } = (await (await team.call(`/api/conversations/${conversationId}`)).json()) as any;
+    expect(conversation.ai).toBeNull();
+    const [row] = await deps.db.select({ aiState: conversations.aiState }).from(conversations).where(eq(conversations.id, conversationId));
+    expect(row!.aiState).toBe("paused");
   });
 });
 

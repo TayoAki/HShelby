@@ -17,12 +17,16 @@ import {
 } from "@hshelby/db";
 import { and, count, desc, eq, sql } from "drizzle-orm";
 import { TelegramError, type TelegramClient } from "./client";
-import { escapeHtml, mirrorHtml, notificationHtml, topicName } from "./format";
+import { escapeHtml, handoverHtml, mirrorHtml, notificationHtml, topicName } from "./format";
 
 /** A stored message to tell the team about: the API enqueues it in the message's own transaction. */
 export const TEAM_NOTIFY_QUEUE = "team.notify";
 export const TEAM_NOTIFY_QUEUE_OPTIONS = { retryLimit: 5, retryDelay: 5, retryBackoff: true, notify: true } as const;
-export type TeamNotifyJob = { messageId: string };
+export type TeamNotifyJob = {
+  messageId: string;
+  /** The AI handed the conversation over (phase B11): tells the team out loud, under the person's message. */
+  handover?: string;
+};
 
 /** One call to Telegram, scheduled into its chat's next free slot. */
 export const TELEGRAM_QUEUE = "telegram.send";
@@ -30,6 +34,7 @@ export const TELEGRAM_QUEUE_OPTIONS = { retryLimit: 5, retryDelay: 5, retryBacko
 export type TelegramJob =
   | { kind: "notify"; messageId: string }
   | { kind: "mirror"; messageId: string }
+  | { kind: "handover"; messageId: string; reason: string }
   /** 👍 on the team's reply once it's saved (or "Reply sent." where reactions are off). */
   | { kind: "react"; appId: string; chatId: number; telegramMessageId: number }
   | { kind: "notice"; appId: string; chatId: number; replyTo: number; text: string };
@@ -113,10 +118,11 @@ async function recordIssue(db: Db | Tx, appId: string, issue: string) {
 }
 
 /**
- * What team.notify does with a stored message: a customer's message becomes a notification, and a reply
- * written anywhere but Telegram is mirrored. Null when the app has no active Telegram connection.
+ * What team.notify does with a stored message: a customer's message becomes a notification, a reply written
+ * anywhere but Telegram is mirrored, and an AI handover is announced. Null when the app has no active Telegram
+ * connection.
  */
-export async function planNotify(db: Db, messageId: string) {
+export async function planNotify(db: Db, { messageId, handover }: TeamNotifyJob) {
   const [row] = await db
     .select({ message: messages, appId: conversations.appId, engaged: conversations.userEngaged, connection: telegramConnections })
     .from(messages)
@@ -126,6 +132,7 @@ export async function planNotify(db: Db, messageId: string) {
   if (!row || row.connection.paused) return null;
   // an automation's messages to someone who hasn't written stay out of the team's chat, like out of the inbox
   if (!row.engaged) return null;
+  if (handover !== undefined) return { job: { kind: "handover", messageId, reason: handover } as TelegramJob, botId: row.connection.botId, chatId: row.connection.chatId };
   if (row.message.sender === "agent" && row.message.source === "telegram") return null;
   const job: TelegramJob = { kind: row.message.sender === "user" ? "notify" : "mirror", messageId };
   return { job, botId: row.connection.botId, chatId: row.connection.chatId };
@@ -134,14 +141,14 @@ export async function planNotify(db: Db, messageId: string) {
 /** team.notify: schedules the post for a stored message into its chat's next slot, if the app posts to Telegram. */
 export async function scheduleNotify(
   db: Db,
-  messageId: string,
+  notify: TeamNotifyJob,
   enqueue: (job: TelegramJob, startAfter: Date, singletonKey: string) => Promise<unknown>,
   intervalMs = DEFAULT_CHAT_INTERVAL_MS,
 ) {
-  const plan = await planNotify(db, messageId);
+  const plan = await planNotify(db, notify);
   if (!plan) return "skipped" as const;
   const startAfter = await reserveSlot(db, plan.botId, plan.chatId, intervalMs);
-  await enqueue(plan.job, startAfter, `${plan.job.kind}:${messageId}`);
+  await enqueue(plan.job, startAfter, `${plan.job.kind}:${notify.messageId}`);
   return plan.job.kind;
 }
 
@@ -265,7 +272,7 @@ async function perform(deps: TelegramDeps, tx: Tx, job: TelegramJob, connection:
     return "sent";
   }
 
-  // mirror: silently, as a reply under the customer's latest notification
+  // mirror (silently) or handover (out loud): as a reply under the customer's latest notification
   const [latest] = await tx
     .select({ telegramMessageId: telegramPosts.telegramMessageId })
     .from(telegramPosts)
@@ -279,6 +286,12 @@ async function perform(deps: TelegramDeps, tx: Tx, job: TelegramJob, connection:
     )
     .orderBy(desc(telegramPosts.createdAt))
     .limit(1);
+  if (job.kind === "handover") {
+    // a reply to this post answers the person, like a reply to their notification
+    const sent = await telegram.sendMessage(token, chatId, handoverHtml(job.reason), { threadId, replyTo: latest?.telegramMessageId });
+    await recordPost(tx, connection, sent.message_id, row.conversation.id, row.message.id, "notification");
+    return "sent";
+  }
   const senderName =
     row.message.source === "ai" ? "AI" : row.message.source === "automation" ? "Automation" : (row.authorName?.split(" ")[0] ?? "Team");
   const sent = await telegram.sendMessage(token, chatId, mirrorHtml({ ...content, senderName }), {

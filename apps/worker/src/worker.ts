@@ -143,7 +143,7 @@ export async function startWorker({ db, boss, apns, keyring, storage, stripe, te
       (job) =>
         scheduleNotify(
           db,
-          job.data.messageId,
+          job.data,
           (next, startAfter, singletonKey) => boss.send(TELEGRAM_QUEUE, next, { startAfter, singletonKey }),
           telegramIntervalMs,
         ),
