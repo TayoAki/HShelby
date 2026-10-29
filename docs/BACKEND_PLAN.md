@@ -27,7 +27,7 @@ Why one Postgres for everything at the start: messages, the job queue, realtime 
 
 ## Status
 
-**B0–B8 run on Railway staging** (billing is switched off there until the Stripe test secret key is set) (project `hshelby`, environment `staging`): dashboard at `https://dashboard-staging-0dee.up.railway.app`, API at `https://api-staging-f8f8.up.railway.app`.
+**B0–B9 run on Railway staging** (billing is switched off there until the Stripe test secret key is set) (project `hshelby`, environment `staging`): dashboard at `https://dashboard-staging-0dee.up.railway.app`, API at `https://api-staging-f8f8.up.railway.app`.
 
 B1 (messaging core) as built:
 
@@ -128,6 +128,18 @@ B8 (Telegram) as built:
 - **Dashboard:** a Telegram card on the app's settings page (BotFather steps, connect, status, pause, topics, test, disconnect, the last refusal), and "via Telegram" on replies sent from there.
 - **Done-when tests:** `apps/api/test/telegram.test.ts` (a Reply in Telegram lands in the app chat once, with the 👍; connecting, refusals, pausing, mirrors, routing and what's ignored, too-long replies, a forged secret, reactions off, several teammates, a migrated group, a removed bot, topics, a 429) and `apps/worker/test/telegram.test.ts` (a burst of 50 customer messages is posted in order with no 429 from a fake Telegram that allows 20 per window, scaled to a 110 ms interval).
 - **Not checked here:** a real Telegram group (needs a bot token from BotFather). Everything up to Telegram's API runs against the fake; on staging, connecting with a made-up token gets Telegram's own refusal.
+
+B9 (appearance and assets) as built:
+
+- **The document** (`packages/contracts/src/appearance.ts`): every remote option of the SDK's Appearance except the font family: colors per mode (`{light, dark}`, 6-digit hex), color scheme, title, welcome title and welcome text per language (BCP 47 keys, up to 48), the three hide switches, welcome icon (SF Symbol, library image or hidden) with size, corner radius and offset, font design, close button and icon, fading older messages, and card styling (button and trailing icons, icon size 8–28, button and text colors). Every key is optional: absent means the app's own value, then the SDK's default. Unknown keys are refused.
+- **Draft and publish** (`/api/apps/:id/appearance`, admins edit; `app_appearance`): `PUT …/draft {document, baseVersion}` saves only if nobody saved since `baseVersion` (409 `appearance_conflict` otherwise; the editor offers to reload). `POST …/publish {draftVersion}` copies that exact draft to the published document, so nobody publishes changes they haven't seen, and is audited. `POST …/discard` resets the draft to what's published. No autosave, no history.
+- **For the SDK** (no credentials, before registering): `GET /v1/apps/:appId/appearance` returns `{version, appearance, team}` with only the published document (null until the first publish), `Cache-Control: public, max-age=60` and an ETag that changes with each publish or team switch (304 for a cached copy). Library images come as URLs, `GET /v1/assets/<id>.png`, served only while some published design uses them (`published_asset_ids`, GIN-indexed) and cached as immutable. Drafts and draft-only images never leave the dashboard.
+- **The app's own design:** `PATCH /v1/device` (and registration) take `appearance`, the SDK's local values (bundled images as `{type: "bundled"}`), stored per app when changed or over an hour old. The editor offers "Start from it".
+- **Asset library** (`/api/assets`, shared by the workspace's apps, admins add and delete): SVG, PNG, JPEG or WebP up to 2 MB, checked by content, converted with sharp to a transparent PNG of at most 512 px (vectors rendered at full size, bitmaps never enlarged); the original is discarded. SVGs with scripts, external references, entities or foreign objects are refused. 50 MB per workspace. An image any draft or published design uses can't be deleted (`asset_in_use`), and a design can only use its own workspace's images.
+- **Team photos and names:** two per-app switches (`PATCH /api/apps/:id/team-display`) that apply at once, without publishing. Teammates upload a profile photo on their account page (`PUT /api/me/photo`: cropped square, 256 px JPEG, metadata dropped). SDK messages from a teammate carry `author: {name, initial, photoUrl}`: the first name with names on, and a one-hour link to the photo (or the initial without one) with photos on; null otherwise.
+- **Dashboard:** a Chat design editor (`/apps/:id/appearance`: colors per mode, texts per language, icons, font, close button, card styling, team switches, a live light/dark phone preview, Save draft / Publish / Discard, the conflict notice), an Asset library page with the quota, and an account page for the profile photo.
+- **Done-when tests** (`apps/api/test/appearance.test.ts`): the SDK gets nothing before the first publish, the published document after it, and never a later draft; images in drafts aren't served; stale saves and publishes are refused; ETag/304; validation and admin-only editing; conversion of JPEG, WebP and SVG, unsafe SVGs and oversized files refused, in-use images kept; reply authors with names and photos switched on and off.
+- **Deferred:** the 48 built-in languages' matching rules live in the SDK; "Users" page and per-teammate team names (the user's account name is used).
 
 Where B0 differs from the plan below:
 
@@ -463,7 +475,7 @@ Each phase ends with acceptance tests that must pass in CI and on staging.
 | **B6 Realtime** (done, see Status) | WS gateway, LISTEN/NOTIFY fan-out, typing, presence, skip-push-when-in-chat | Two API instances: a reply sent via instance A reaches a socket on B in < 300 ms | 1–1.5 wks |
 | **B7 Cards** (done, see Status) | Review + offer cards, paywall registry from device reports, click receipts, stats | An offer card for an unreported paywall is refused; the first tap is recorded once | 1 wk |
 | **B8 Telegram** (done, see Status) | Connect bot, notify, reply mapping, reactions, supergroup migration, throttle | Replying in Telegram lands in the app chat; 50 bursts respect the per-chat limit | 1.5 wks |
-| **B9 Appearance & assets** | Draft/publish remote appearance, asset library (PNG ≤ 512 px), team photos | SDK fetches the published version; drafts never leak | 1 wk |
+| **B9 Appearance & assets** (done, see Status) | Draft/publish remote appearance, asset library (PNG ≤ 512 px), team photos | SDK fetches the published version; drafts never leak | 1 wk |
 | **B10 Subscriptions + automations** | Four provider receivers, normalization, matching, automation builder API, run engine with waits, suppression, holds, results | Replaying each provider's fixture set yields the expected canonical events; a "cancelled → offer tomorrow 10:00 local" run fires at the right UTC time across 3 time zones | 3 wks |
 | **B11 AI replies** | See §11 | Eval set passes the bar you set; handover never double-replies | 2–3 wks |
 | **B12 Hardening** | Load test, Redis if needed, audit log, restore drill | 1,000 polling devices + 50 msgs/s holds p95 < 150 ms on staging | 1 wk |

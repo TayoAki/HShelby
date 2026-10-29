@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { LocalAppearance } from "./appearance";
 import { InboxCard, MessageKind, ReportedPaywall, ReportedPaywalls, SdkCard } from "./cards";
 import { IdentityLabels, IdentityToken, Metadata, SdkIdentity } from "./identity";
 import { Attachment, PHOTO_LIMITS } from "./photos";
@@ -67,6 +68,8 @@ const DeviceState = {
   push: PushRegistration.nullable().optional(),
   /** The paywalls the app can show right now (phase B7); offers can only name these. */
   paywalls: ReportedPaywalls.optional(),
+  /** The app's own appearance settings (phase B9), where the dashboard's design editor starts. */
+  appearance: LocalAppearance.optional(),
 };
 
 export const RegisterDeviceInput = z
@@ -101,6 +104,11 @@ export const SdkMessage = z.object({
   card: SdkCard.nullable(),
   /** The first tap on the card's button. */
   actionClickedAt: z.string().nullable(),
+  /**
+   * The teammate behind a reply, as far as the app shows it (phase B9): a first name with "Show team names", a
+   * temporary photo link with "Show team photos" (and the initial when there's no photo). Null otherwise.
+   */
+  author: z.object({ name: z.string().nullable(), initial: z.string().nullable(), photoUrl: z.string().nullable() }).nullable(),
   /** Set on the device's own messages, so the SDK can match them to its pending sends. */
   clientId: z.string().nullable(),
   attachments: z.array(Attachment),

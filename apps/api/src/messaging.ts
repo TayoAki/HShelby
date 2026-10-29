@@ -1,6 +1,6 @@
 import type { MessagePageQuery, StoredCard } from "@hshelby/contracts";
 import { uuidv7 } from "@hshelby/core";
-import { apps, conversations, messages, users, type Db, type Tx } from "@hshelby/db";
+import { apps, conversations, messages, userPhotos, users, type Db, type Tx } from "@hshelby/db";
 import { and, asc, count, desc, eq, gt, isNull, lt, sql } from "drizzle-orm";
 import { ApiError, isUniqueViolation, notFound } from "./errors";
 import type { Jobs } from "./jobs";
@@ -296,7 +296,7 @@ export async function markTeamRead(
   });
 }
 
-export type PagedMessage = MessageRow & { authorName: string | null };
+export type PagedMessage = MessageRow & { authorName: string | null; authorPhotoKey?: string | null };
 
 /**
  * One page of a conversation, oldest first. With `after`: messages newer than that seq (polling, catch-up),
@@ -306,9 +306,10 @@ export type PagedMessage = MessageRow & { authorName: string | null };
 export async function pageMessages(db: Db, conversationId: string, query: MessagePageQuery) {
   const limit = query.limit ?? 50;
   const base = db
-    .select({ message: messages, authorName: users.name })
+    .select({ message: messages, authorName: users.name, authorPhotoKey: userPhotos.objectKey })
     .from(messages)
-    .leftJoin(users, eq(users.id, messages.authorUserId));
+    .leftJoin(users, eq(users.id, messages.authorUserId))
+    .leftJoin(userPhotos, eq(userPhotos.userId, messages.authorUserId));
 
   const newer = query.after !== undefined;
   const rows = newer
@@ -326,6 +327,6 @@ export async function pageMessages(db: Db, conversationId: string, query: Messag
         .orderBy(desc(messages.seq))
         .limit(limit + 1);
 
-  const page = rows.slice(0, limit).map((r): PagedMessage => ({ ...r.message, authorName: r.authorName }));
+  const page = rows.slice(0, limit).map((r): PagedMessage => ({ ...r.message, authorName: r.authorName, authorPhotoKey: r.authorPhotoKey }));
   return { messages: newer ? page : page.reverse(), hasMore: rows.length > limit };
 }

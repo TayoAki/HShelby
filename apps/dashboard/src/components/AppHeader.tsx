@@ -9,6 +9,7 @@ import { BrandMark } from "./ui";
 const links = [
   { href: "/inbox", label: "Inbox" },
   { href: "/apps", label: "Apps" },
+  { href: "/assets", label: "Assets" },
   { href: "/billing", label: "Billing" },
 ] as const;
 
@@ -38,7 +39,11 @@ export function AppHeader({ className = "" }: { className?: string }) {
         </nav>
       </div>
       <div className="flex items-center gap-6">
-        {data && <span className="hidden text-[14px] text-secondary sm:inline">{data.user.email}</span>}
+        {data && (
+          <Link href="/account" className="hidden text-[14px] text-secondary hover:text-fg sm:inline">
+            {data.user.email}
+          </Link>
+        )}
         <SignOutButton />
       </div>
     </header>

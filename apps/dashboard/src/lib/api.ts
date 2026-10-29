@@ -26,8 +26,8 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
 }
 
 /** Multipart upload to the API (the browser sets the content type and boundary). */
-export async function apiForm<T>(path: string, form: FormData): Promise<T> {
-  const res = await fetch(`/api${path}`, { method: "POST", body: form, credentials: "same-origin" });
+export async function apiForm<T>(path: string, form: FormData, method: "POST" | "PUT" = "POST"): Promise<T> {
+  const res = await fetch(`/api${path}`, { method, body: form, credentials: "same-origin" });
   const body = (await res.json().catch(() => null)) as (T & Partial<ErrorBody>) | null;
   if (!res.ok) {
     const fallback = res.status === 413 ? "Photos can be up to 1 MB" : `Upload failed (${res.status})`;

@@ -5,3 +5,4 @@ export * from "./push";
 export * from "./attachments";
 export * from "./cards";
 export * from "./telegram";
+export * from "./appearance";

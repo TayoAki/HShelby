@@ -44,6 +44,14 @@ export type SdkEnv = {
   Variables: {
     requestId: string;
     device: typeof devices.$inferSelect;
-    app: { id: string; organizationId: string; onlyVerified: boolean; identitySecretEnc: string; appStoreId: string | null };
+    app: {
+      id: string;
+      organizationId: string;
+      onlyVerified: boolean;
+      identitySecretEnc: string;
+      appStoreId: string | null;
+      showTeamPhotos: boolean;
+      showTeamNames: boolean;
+    };
   };
 };

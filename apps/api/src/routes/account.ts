@@ -1,4 +1,4 @@
-import { organizations } from "@hshelby/db";
+import { organizations, userPhotos } from "@hshelby/db";
 import { eq } from "drizzle-orm";
 import { Hono } from "hono";
 import type { AppEnv, Deps } from "../context";
@@ -11,8 +11,10 @@ export function accountRoutes(deps: Deps) {
     const user = c.get("user");
     const org = c.get("org");
     const [row] = await deps.db.select().from(organizations).where(eq(organizations.id, org.id)).limit(1);
+    const [photo] = await deps.db.select().from(userPhotos).where(eq(userPhotos.userId, user.id));
+    const photoUrl = photo && deps.storage ? await deps.storage.presignDownload(photo.objectKey, 3600, "image/jpeg") : null;
     return c.json({
-      user: { id: user.id, name: user.name, email: user.email },
+      user: { id: user.id, name: user.name, email: user.email, photoUrl },
       organization: row ? { id: row.id, name: row.name, slug: row.slug, role: org.role } : null,
     });
   });

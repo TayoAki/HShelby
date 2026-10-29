@@ -106,6 +106,16 @@ export default function AppSettingsPage() {
             </div>
           </div>
 
+          <SettingsCard title="Chat design">
+            <p>
+              Colors, texts, icons and card styling for the chat inside the app, set here instead of in code. Edit a
+              draft and publish it; apps switch to it the next time their chat opens.
+            </p>
+            <Link href={`/apps/${app.id}/appearance`} className={`inline-flex items-center ${secondaryButton}`}>
+              Open the design editor
+            </Link>
+          </SettingsCard>
+
           <SettingsCard title="Identity verification">
             <p>
               Your server signs a short token for the signed-in user, so your team can trust who they&apos;re talking to.

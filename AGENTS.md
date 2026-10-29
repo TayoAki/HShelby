@@ -13,7 +13,7 @@ npm-workspaces monorepo. Node 22.
 | `packages/core` | IDs, secret encryption, App Store client, setup-prompt template. |
 | `packages/push` | APNs client, notification content and delivery (shared by API "Send test" and the worker); `@hshelby/push/testing` has a fake APNs. |
 | `packages/telegram` | Telegram Bot API client, notification/mirror formatting, per-chat pacing and delivery (shared by API and worker); `@hshelby/telegram/testing` has a fake Bot API. |
-| `packages/storage` | S3-compatible photo storage (presigned PUT/GET, prefix deletes) and JPEG/PNG header checks; `@hshelby/storage/testing` makes a bucket on the test S3. |
+| `packages/storage` | S3-compatible photo storage (presigned PUT/GET, prefix deletes) and JPEG/PNG header checks; `@hshelby/storage/convert` converts library images and profile photos with sharp (API only); `@hshelby/storage/testing` makes a bucket on the test S3. |
 | `packages/billing` | Subscription status rules (what counts as paying), founder-spot count, Stripe→row mapping; `@hshelby/billing/testing` has a fake Stripe (API, signed webhooks, Checkout and portal pages). |
 | `packages/ui` | Phone frame and chat mock shared by web and dashboard. |
 

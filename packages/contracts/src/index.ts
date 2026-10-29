@@ -41,6 +41,10 @@ export const errorCodes = [
   "telegram_chat_unavailable",
   "telegram_bot_in_use",
   "telegram_not_connected",
+  "appearance_conflict",
+  "invalid_image",
+  "asset_quota_exceeded",
+  "asset_in_use",
   "internal_error",
 ] as const;
 export type ErrorCode = (typeof errorCodes)[number];
@@ -53,7 +57,7 @@ export type ErrorBody = z.infer<typeof ErrorBody>;
 /* ---------- account ---------- */
 
 export const Me = z.object({
-  user: z.object({ id: z.string(), name: z.string(), email: z.string() }),
+  user: z.object({ id: z.string(), name: z.string(), email: z.string(), photoUrl: z.string().nullable() }),
   organization: z
     .object({ id: z.string(), name: z.string(), slug: z.string(), role: z.string() })
     .nullable(),
@@ -121,6 +125,7 @@ export type AppStoreResult = z.infer<typeof AppStoreResult>;
 export const AppStoreSearch = z.object({ results: z.array(AppStoreResult) });
 export type AppStoreSearch = z.infer<typeof AppStoreSearch>;
 
+export * from "./appearance";
 export * from "./billing";
 export * from "./cards";
 export * from "./identity";

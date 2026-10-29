@@ -31,6 +31,9 @@ export const apps = pgTable(
      * reply there without a subscription. Not a foreign key; if the conversation is deleted, nothing matches.
      */
     setupConversationId: uuid("setup_conversation_id"),
+    /** Team photos and names beside replies in the app (phase B9); these switches apply without publishing. */
+    showTeamPhotos: boolean("show_team_photos").notNull().default(false),
+    showTeamNames: boolean("show_team_names").notNull().default(false),
     createdAt: ts("created_at").notNull().defaultNow(),
     updatedAt: ts("updated_at").notNull().defaultNow(),
     deletedAt: ts("deleted_at"),

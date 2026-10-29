@@ -12,13 +12,14 @@ import {
   type Attachment,
   type DeviceDetails,
   type PushRegistration,
+  type LocalAppearance,
   type ReportedPaywall,
   type SdkConversation,
   type SdkMessage,
   type UploadTicket,
 } from "@hshelby/contracts";
 import { decryptSecret, newDeviceSecret, uuidv7 } from "@hshelby/core";
-import { apps, attachments, conversations, devices, type Db, type Tx } from "@hshelby/db";
+import { appAppearance, apps, attachments, conversations, devices, type Db, type Tx } from "@hshelby/db";
 import { and, count, eq, gt, isNull, ne, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import type { Deps, SdkEnv } from "../context";
@@ -26,7 +27,7 @@ import { recordAppPaywalls, recordClick, toSdkCard } from "../cards";
 import { hashDeviceSecret, signAccessToken } from "../device-tokens";
 import { ApiError } from "../errors";
 import { nextIdentity, nextMetadata, sendingState, toSdkIdentity, verifyIdentityToken } from "../identity";
-import { appendUserMessage, markUserRead, pageMessages, type ConversationRow, type MessageRow } from "../messaging";
+import { appendUserMessage, markUserRead, pageMessages, type ConversationRow, type MessageRow, type PagedMessage } from "../messaging";
 import { requireDevice } from "../middleware";
 import {
   attachmentsByMessage,
@@ -48,7 +49,31 @@ const toSdkConversation = (c: ConversationRow): SdkConversation => ({
   unread: c.unreadForUser,
 });
 
-const toSdkMessage = (m: MessageRow, attachmentsOf: Map<string, Attachment[]>, appStoreId: string | null): SdkMessage => ({
+type SdkApp = SdkEnv["Variables"]["app"];
+type Author = SdkMessage["author"];
+
+/**
+ * Who wrote each teammate reply, as the app is set to show it: first names with "Show team names", photos
+ * (temporary links, or the initial without one) with "Show team photos".
+ */
+async function authorsOf(deps: Deps, app: SdkApp, page: (MessageRow & Partial<Pick<PagedMessage, "authorName" | "authorPhotoKey">>)[]) {
+  const authors = new Map<string, Author>();
+  if (!app.showTeamNames && !app.showTeamPhotos) return authors;
+  for (const m of page) {
+    if (m.sender !== "agent" || !m.authorUserId || !m.authorName || authors.has(m.authorUserId)) continue;
+    const firstName = m.authorName.split(" ")[0] ?? m.authorName;
+    const photoUrl =
+      app.showTeamPhotos && m.authorPhotoKey && deps.storage ? await deps.storage.presignDownload(m.authorPhotoKey, 3600, "image/jpeg") : null;
+    authors.set(m.authorUserId, {
+      name: app.showTeamNames ? firstName : null,
+      initial: app.showTeamPhotos ? (Array.from(firstName)[0]?.toUpperCase() ?? null) : null,
+      photoUrl,
+    });
+  }
+  return authors;
+}
+
+const toSdkMessage = (m: MessageRow, attachmentsOf: Map<string, Attachment[]>, appStoreId: string | null, authors = new Map<string, Author>()): SdkMessage => ({
   id: m.id,
   seq: m.seq,
   sender: m.sender,
@@ -56,11 +81,27 @@ const toSdkMessage = (m: MessageRow, attachmentsOf: Map<string, Attachment[]>, a
   text: m.text,
   card: toSdkCard(m.card, appStoreId),
   actionClickedAt: m.actionClickedAt?.toISOString() ?? null,
+  author: (m.authorUserId && authors.get(m.authorUserId)) || null,
   // only the device's own client IDs; a teammate's are none of its business
   clientId: m.sender === "user" ? m.clientId : null,
   attachments: attachmentsOf.get(m.id) ?? [],
   createdAt: m.createdAt.toISOString(),
 });
+
+/**
+ * Keeps the app's reported local appearance, rewriting it only when it changed or is over an hour old (the SDK
+ * reports it on every foreground).
+ */
+async function recordLocalAppearance(db: Db | Tx, appId: string, appearance: LocalAppearance) {
+  await db
+    .insert(appAppearance)
+    .values({ appId, reportedLocal: appearance, reportedAt: new Date() })
+    .onConflictDoUpdate({
+      target: appAppearance.appId,
+      set: { reportedLocal: appearance, reportedAt: new Date() },
+      setWhere: sql`${appAppearance.reportedLocal} is distinct from excluded.reported_local or ${appAppearance.reportedAt} < now() - interval '1 hour'`,
+    });
+}
 
 /** Device columns for a paywall report: the whole available list, replaced. */
 const paywallColumns = (paywalls: ReportedPaywall[] | undefined) =>
@@ -142,6 +183,7 @@ export function sdkRoutes(deps: Deps) {
         .returning();
       if (input.push) await releasePushToken(tx, app.id, input.push.token, deviceId);
       if (input.paywalls) await recordAppPaywalls(tx, app.id, input.paywalls);
+      if (input.appearance) await recordLocalAppearance(tx, app.id, input.appearance);
       return row;
     });
     const token = await signAccessToken(deps.deviceTokenKey, { deviceId, appId: app.id, sessionVersion: 1 });
@@ -210,6 +252,7 @@ export function sdkRoutes(deps: Deps) {
         .returning();
       if (input.push) await releasePushToken(tx, current!.appId, input.push.token, current!.id);
       if (input.paywalls) await recordAppPaywalls(tx, current!.appId, input.paywalls);
+      if (input.appearance) await recordLocalAppearance(tx, current!.appId, input.appearance);
       return updated!;
     });
     return c.json({ identity: toSdkIdentity(device) });
@@ -242,10 +285,11 @@ export function sdkRoutes(deps: Deps) {
     if (!conversation) return c.json({ ...state, conversation: null, messages: [], hasMore: false });
     const page = await pageMessages(db, conversation.id, query);
     const attachmentsOf = await attachmentsByMessage(db, deps.storage, page.messages.map((m) => m.id));
+    const authors = await authorsOf(deps, c.get("app"), page.messages);
     return c.json({
       ...state,
       conversation: toSdkConversation(conversation),
-      messages: page.messages.map((m) => toSdkMessage(m, attachmentsOf, c.get("app").appStoreId)),
+      messages: page.messages.map((m) => toSdkMessage(m, attachmentsOf, c.get("app").appStoreId, authors)),
       hasMore: page.hasMore,
     });
   });
