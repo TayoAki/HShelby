@@ -2,6 +2,7 @@ import type { AppStoreClient, Keyring } from "@hshelby/core";
 import type { Db, devices } from "@hshelby/db";
 import type { ApnsClient } from "@hshelby/push";
 import type { Storage } from "@hshelby/storage";
+import type { TelegramClient } from "@hshelby/telegram";
 import type { Logger } from "pino";
 import type { Auth } from "./auth";
 import type { Billing } from "./billing";
@@ -23,6 +24,8 @@ export type Deps = {
   /** Photo storage; null when no bucket is configured. */
   storage: Storage | null;
   billing: Billing;
+  /** Telegram connections are set up from the API; posts go out from the worker. */
+  telegram: TelegramClient;
 };
 
 type SessionResult = NonNullable<Awaited<ReturnType<Auth["api"]["getSession"]>>>;

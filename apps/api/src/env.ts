@@ -39,6 +39,10 @@ const EnvSchema = z.object({
   STRIPE_PRICE_STANDARD_MONTHLY: optional,
   STRIPE_PRICE_STANDARD_YEARLY: optional,
   FOUNDER_SPOTS: z.coerce.number().int().min(0).default(50),
+  /** The Telegram Bot API (tests point it at a fake). */
+  TELEGRAM_API_URL: z.string().url().default("https://api.telegram.org"),
+  /** Minimum gap between the bot's posts in one chat; Telegram allows about 20 a minute in a group. */
+  TELEGRAM_CHAT_INTERVAL_MS: z.coerce.number().int().min(0).default(3000),
 });
 
 export type Env = z.infer<typeof EnvSchema>;

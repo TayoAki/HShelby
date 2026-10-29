@@ -2,6 +2,7 @@ import { parseKeyring } from "@hshelby/core";
 import { createDb } from "@hshelby/db";
 import { createApnsClient } from "@hshelby/push";
 import { createStorage, storageConfigFromEnv } from "@hshelby/storage";
+import { createTelegramClient, DEFAULT_CHAT_INTERVAL_MS } from "@hshelby/telegram";
 import { PgBoss } from "pg-boss";
 import pino from "pino";
 import Stripe from "stripe";
@@ -28,7 +29,11 @@ const stripeKey = process.env.STRIPE_SECRET_KEY?.trim();
 if (stripeKey?.startsWith("sk_live_")) throw new Error("Refusing to start with a live Stripe key: Stripe runs in test mode only.");
 const stripe = stripeKey ? new Stripe(stripeKey) : null;
 
-const queues = await startWorker({ db, boss, apns, keyring: parseKeyring(process.env.ENC_KEYS), storage, stripe, logger });
+// Telegram: posts customer messages to the chats apps connected (decrypting their bot tokens with ENC_KEYS)
+const telegram = createTelegramClient({ baseUrl: process.env.TELEGRAM_API_URL });
+const telegramIntervalMs = Number(process.env.TELEGRAM_CHAT_INTERVAL_MS ?? DEFAULT_CHAT_INTERVAL_MS);
+
+const queues = await startWorker({ db, boss, apns, keyring: parseKeyring(process.env.ENC_KEYS), storage, stripe, telegram, telegramIntervalMs, logger });
 logger.info({ queues }, "worker started");
 
 for (const signal of ["SIGTERM", "SIGINT"] as const) {

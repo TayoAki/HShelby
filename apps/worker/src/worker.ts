@@ -2,7 +2,19 @@ import type { Keyring } from "@hshelby/core";
 import type { Db } from "@hshelby/db";
 import { deliverMessagePush, PUSH_QUEUE, PUSH_QUEUE_OPTIONS, type ApnsClient, type PushJob } from "@hshelby/push";
 import type { Storage } from "@hshelby/storage";
-import type { PgBoss } from "pg-boss";
+import {
+  DEFAULT_CHAT_INTERVAL_MS,
+  scheduleNotify,
+  sendTelegramJob,
+  TEAM_NOTIFY_QUEUE,
+  TEAM_NOTIFY_QUEUE_OPTIONS,
+  TELEGRAM_QUEUE,
+  TELEGRAM_QUEUE_OPTIONS,
+  type TeamNotifyJob,
+  type TelegramClient,
+  type TelegramJob,
+} from "@hshelby/telegram";
+import type { Job, JobResult, JobWithMetadata, PgBoss } from "pg-boss";
 import type { Logger } from "pino";
 import type Stripe from "stripe";
 import { syncSubscriptions } from "./jobs/billing";
@@ -17,6 +29,13 @@ const QUEUES = {
   billing: "billing.sync",
 } as const;
 
+/**
+ * For queues that see bursts: up to 10 jobs per fetch, fetched back to back while the queue keeps returning
+ * full batches (pg-boss otherwise waits for its 30 s backstop poll after a NOTIFY wake-up), each job settled
+ * on its own so one failure retries only that job.
+ */
+const BURSTY = { batchSize: 10, burstWhenBatchFull: true, perJobResults: true } as const;
+
 export type WorkerDeps = {
   db: Db;
   boss: PgBoss;
@@ -25,14 +44,45 @@ export type WorkerDeps = {
   storage: Storage | null;
   /** For the billing backstop; null when billing is off. */
   stripe: Stripe | null;
+  telegram: TelegramClient;
+  /** Minimum gap between the bot's posts in one chat (tests shorten it). */
+  telegramIntervalMs?: number;
   logger: Logger;
 };
 
 /** Creates the queues and schedules, and starts working them. */
-export async function startWorker({ db, boss, apns, keyring, storage, stripe, logger }: WorkerDeps) {
+export async function startWorker({ db, boss, apns, keyring, storage, stripe, telegram, telegramIntervalMs = DEFAULT_CHAT_INTERVAL_MS, logger }: WorkerDeps) {
+  /**
+   * Runs a batch job by job (or all at once with `parallel`): a thrown error fails that job alone. A batch
+   * comes back in no particular order, so ordered queues sort it first.
+   */
+  const eachJob =
+    <T, J extends Job<T> = Job<T>>(
+      queue: string,
+      handle: (job: J) => Promise<unknown>,
+      { parallel = false, order }: { parallel?: boolean; order?: (a: J, b: J) => number } = {},
+    ) =>
+    async (batch: J[]): Promise<JobResult[]> => {
+      const jobs = order ? [...batch].sort(order) : batch;
+      const run = async (job: J): Promise<JobResult> => {
+        try {
+          return { id: job.id, status: "completed", output: await handle(job) };
+        } catch (err) {
+          logger.warn({ err, queue, jobId: job.id, attempt: job.retryCount + 1 }, "job failed");
+          return { id: job.id, status: "failed", output: { message: err instanceof Error ? err.message : String(err) } };
+        }
+      };
+      if (parallel) return Promise.all(jobs.map(run));
+      const results: JobResult[] = [];
+      for (const job of jobs) results.push(await run(job));
+      return results;
+    };
+
   await boss.start();
   for (const queue of Object.values(QUEUES)) await boss.createQueue(queue);
   await boss.createQueue(PUSH_QUEUE, PUSH_QUEUE_OPTIONS);
+  await boss.createQueue(TEAM_NOTIFY_QUEUE, TEAM_NOTIFY_QUEUE_OPTIONS);
+  await boss.createQueue(TELEGRAM_QUEUE, TELEGRAM_QUEUE_OPTIONS);
   // pg-boss keeps one schedule per name across worker replicas.
   await boss.schedule(QUEUES.cleanup, "0 3 * * *", null, { tz: "UTC" });
   await boss.schedule(QUEUES.purgeApps, "*/15 * * * *", null, { tz: "UTC" });
@@ -67,13 +117,57 @@ export async function startWorker({ db, boss, apns, keyring, storage, stripe, lo
 
   // Retryable APNs answers throw, so pg-boss backs off and tries again; the last attempt records the
   // failure on the device instead.
-  await boss.work<PushJob>(PUSH_QUEUE, { localConcurrency: 4 }, async ([job]) => {
-    const outcome = await deliverMessagePush({ db, apns, keyring }, job!.data.messageId, {
-      lastAttempt: job!.retryCount >= PUSH_QUEUE_OPTIONS.retryLimit,
-    });
-    logger.info({ messageId: job!.data.messageId, outcome, attempt: job!.retryCount + 1 }, "push");
-    return outcome;
-  });
+  await boss.work(
+    PUSH_QUEUE,
+    { ...BURSTY, localConcurrency: 2 },
+    eachJob<PushJob>(
+      PUSH_QUEUE,
+      async (job) => {
+        const outcome = await deliverMessagePush({ db, apns, keyring }, job.data.messageId, {
+          lastAttempt: job.retryCount >= PUSH_QUEUE_OPTIONS.retryLimit,
+        });
+        logger.info({ messageId: job.data.messageId, outcome, attempt: job.retryCount + 1 }, "push");
+        return outcome;
+      },
+      { parallel: true },
+    ),
+  );
 
-  return [...Object.values(QUEUES), PUSH_QUEUE];
+  // A stored message for the team: if the app posts to Telegram, schedule the post into the chat's next slot.
+  // in order, so a burst's slots follow the messages' order
+  await boss.work(
+    TEAM_NOTIFY_QUEUE,
+    { ...BURSTY, includeMetadata: true },
+    eachJob<TeamNotifyJob, JobWithMetadata<TeamNotifyJob>>(
+      TEAM_NOTIFY_QUEUE,
+      (job) =>
+        scheduleNotify(
+          db,
+          job.data.messageId,
+          (next, startAfter, singletonKey) => boss.send(TELEGRAM_QUEUE, next, { startAfter, singletonKey }),
+          telegramIntervalMs,
+        ),
+      { order: (a, b) => a.createdOn.getTime() - b.createdOn.getTime() },
+    ),
+  );
+
+  // Sends to one chat are paced inside sendTelegramJob; a 429 is rescheduled after Telegram's retry_after.
+  // One worker taking jobs in creation (= slot) order keeps a chat's posts in the order they were written.
+  // Scheduled jobs come due without a NOTIFY, so this queue polls every second.
+  await boss.work(
+    TELEGRAM_QUEUE,
+    { ...BURSTY, includeMetadata: true, pollingIntervalSeconds: 1 },
+    eachJob<TelegramJob, JobWithMetadata<TelegramJob>>(TELEGRAM_QUEUE, async (job) => {
+      const outcome = await sendTelegramJob({ db, telegram, keyring, intervalMs: telegramIntervalMs }, job.data, {
+        lastAttempt: job.retryCount >= TELEGRAM_QUEUE_OPTIONS.retryLimit,
+      });
+      if (typeof outcome === "object") {
+        await boss.send(TELEGRAM_QUEUE, job.data, { startAfter: new Date(Date.now() + outcome.retryAfter * 1000) });
+      }
+      logger.info({ kind: job.data.kind, outcome }, "telegram");
+      return outcome;
+    }, { order: (a, b) => a.startAfter.getTime() - b.startAfter.getTime() || a.createdOn.getTime() - b.createdOn.getTime() }),
+  );
+
+  return [...Object.values(QUEUES), PUSH_QUEUE, TEAM_NOTIFY_QUEUE, TELEGRAM_QUEUE];
 }

@@ -4,14 +4,15 @@ npm-workspaces monorepo. Node 22.
 
 | Path | What |
 |---|---|
-| `apps/api` | Hono API: Better Auth at `/api/auth/*`, org-scoped `/api/*`, SDK `/v1/*`, live WebSockets at `/api/live` and `/v1/live` (fan-out with Postgres LISTEN/NOTIFY). `src/server.ts` starts HTTP and the gateway together. Tests hit a real Postgres. |
-| `apps/worker` | pg-boss jobs: `push.send`, nightly cleanup, deleted-app purge, hourly unsent-upload sweep, hourly `billing.sync`. Needs `DATABASE_URL` and `ENC_KEYS`; `S3_*` for photos, `STRIPE_SECRET_KEY` for the billing sync. |
+| `apps/api` | Hono API: Better Auth at `/api/auth/*`, org-scoped `/api/*`, SDK `/v1/*`, webhooks `/webhooks/*` (Telegram), live WebSockets at `/api/live` and `/v1/live` (fan-out with Postgres LISTEN/NOTIFY). `src/server.ts` starts HTTP and the gateway together. Tests hit a real Postgres. |
+| `apps/worker` | pg-boss jobs: `push.send`, `team.notify` → `telegram.send`, nightly cleanup, deleted-app purge, hourly unsent-upload sweep, hourly `billing.sync`. Needs `DATABASE_URL` and `ENC_KEYS`; `S3_*` for photos, `STRIPE_SECRET_KEY` for the billing sync. |
 | `apps/dashboard` | Next.js dashboard. Proxies `/api/*` to the API (`API_INTERNAL_URL`), so auth cookies stay first-party. |
 | `apps/web` | Landing-page study clone. Not deployed (it carries another company's brand). |
 | `packages/db` | Drizzle schema + SQL migrations (`npm run db:generate` after schema changes). |
 | `packages/contracts` | Zod request/response schemas and error codes shared by API and dashboard. |
 | `packages/core` | IDs, secret encryption, App Store client, setup-prompt template. |
 | `packages/push` | APNs client, notification content and delivery (shared by API "Send test" and the worker); `@hshelby/push/testing` has a fake APNs. |
+| `packages/telegram` | Telegram Bot API client, notification/mirror formatting, per-chat pacing and delivery (shared by API and worker); `@hshelby/telegram/testing` has a fake Bot API. |
 | `packages/storage` | S3-compatible photo storage (presigned PUT/GET, prefix deletes) and JPEG/PNG header checks; `@hshelby/storage/testing` makes a bucket on the test S3. |
 | `packages/billing` | Subscription status rules (what counts as paying), founder-spot count, Stripe→row mapping; `@hshelby/billing/testing` has a fake Stripe (API, signed webhooks, Checkout and portal pages). |
 | `packages/ui` | Phone frame and chat mock shared by web and dashboard. |

@@ -50,6 +50,7 @@ function endsGroup(m: Item, next: Item | undefined) {
   return (
     next.sender !== m.sender ||
     next.author?.id !== m.author?.id ||
+    next.source !== m.source ||
     Date.parse(next.createdAt) - Date.parse(m.createdAt) > GROUP_GAP_MS ||
     !sameDay(next.createdAt, m.createdAt)
   );
@@ -433,6 +434,7 @@ export function Thread({ conversationId }: { conversationId: string }) {
                     ) : (
                       <>
                         {agent && m.author && `${m.author.name.split(" ")[0]} · `}
+                        {agent && m.source === "telegram" && "via Telegram · "}
                         {clockTime(m.createdAt)}
                       </>
                     )}

@@ -2,6 +2,7 @@ import { createAppStoreClient, parseKeyring } from "@hshelby/core";
 import { createDb } from "@hshelby/db";
 import { createApnsClient } from "@hshelby/push";
 import { createStorage, storageConfigFromEnv } from "@hshelby/storage";
+import { createTelegramClient } from "@hshelby/telegram";
 import pino from "pino";
 import Stripe from "stripe";
 import { createAuth } from "./auth";
@@ -38,6 +39,7 @@ export function createDeps(
     jobs: createJobs(env.DATABASE_URL, logger),
     apns: overrides.apns ?? createApnsClient(),
     storage: overrides.storage !== undefined ? overrides.storage : storageFromEnv(env),
+    telegram: createTelegramClient({ baseUrl: env.TELEGRAM_API_URL }),
   };
   return { deps, pool };
 }

@@ -308,6 +308,7 @@ export function sdkRoutes(deps: Deps) {
     assertCanSend(device, app.onlyVerified);
     const result = await appendUserMessage(
       db,
+      deps.jobs,
       {
         organizationId: app.organizationId,
         appId: app.id,

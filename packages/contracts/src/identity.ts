@@ -44,6 +44,10 @@ export const SdkIdentity = z.object({
 });
 export type SdkIdentity = z.infer<typeof SdkIdentity>;
 
+/** How the team names a customer: what the app told us, else the device ID's tail. */
+export const customerLabel = (device: { id: string; name: string | null; email: string | null; userId: string | null }) =>
+  device.name ?? device.email ?? (device.userId ? `User ${device.userId}` : `Anonymous · ${device.id.slice(-4).toUpperCase()}`);
+
 export const LogoutInput = z.object({ deviceSecret: z.string().min(1).max(200) }).strict();
 export type LogoutInput = z.infer<typeof LogoutInput>;
 

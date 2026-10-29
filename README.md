@@ -4,11 +4,11 @@ In-app support chat for iOS apps, modelled on a study of [reception.sh](https://
 
 | Path | What |
 |---|---|
-| `apps/api` | Hono API. Better Auth (email + password, organizations, Stripe test-mode subscriptions) at `/api/auth/*`, the dashboard's org-scoped routes (apps, inbox) at `/api/*`, the SDK's at `/v1/*`, and live WebSockets at `/api/live` and `/v1/live`. |
-| `apps/worker` | pg-boss jobs: push delivery, nightly cleanup, purging deleted apps, removing unsent photo uploads, syncing subscriptions from Stripe. |
+| `apps/api` | Hono API. Better Auth (email + password, organizations, Stripe test-mode subscriptions) at `/api/auth/*`, the dashboard's org-scoped routes (apps, inbox) at `/api/*`, the SDK's at `/v1/*`, webhooks at `/webhooks/*`, and live WebSockets at `/api/live` and `/v1/live`. |
+| `apps/worker` | pg-boss jobs: push delivery, Telegram posts, nightly cleanup, purging deleted apps, removing unsent photo uploads, syncing subscriptions from Stripe. |
 | `apps/dashboard` | Next.js dashboard: sign-up/in, onboarding (Add app → Connect → Integrations → Subscribe), the team inbox (replies, photos, review and offer cards), app settings and billing. |
 | `apps/web` | Landing-page clone from the study. Not deployed: it reproduces another company's brand. |
-| `packages/*` | `db` (Drizzle schema + migrations), `contracts` (Zod schemas), `core` (IDs, encryption, App Store client, setup prompt), `push` (APNs client and delivery), `storage` (S3-compatible photo storage), `billing` (subscription rules and a fake Stripe for tests), `ui` (phone and chat mock). |
+| `packages/*` | `db` (Drizzle schema + migrations), `contracts` (Zod schemas), `core` (IDs, encryption, App Store client, setup prompt), `push` (APNs client and delivery), `telegram` (Bot API client, delivery, a fake Telegram for tests), `storage` (S3-compatible photo storage), `billing` (subscription rules and a fake Stripe for tests), `ui` (phone and chat mock). |
 | [`docs/BACKEND_PLAN.md`](docs/BACKEND_PLAN.md) | Stack, data model, API contract and phased schedule. Its Status section covers what runs on Railway staging and the variables each service needs. |
 | [`docs/PRODUCT_TEARDOWN.md`](docs/PRODUCT_TEARDOWN.md) | How reception works: features, SDK surface, identity flow, inferred architecture. |
 | [`SITE_SPEC.md`](SITE_SPEC.md), [`preview/`](preview/) | Spec, video and screenshots of the landing-page clone. |

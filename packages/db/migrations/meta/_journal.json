@@ -57,6 +57,13 @@
       "when": 1793231388707,
       "tag": "0007_cards",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1793232606183,
+      "tag": "0008_telegram",
+      "breakpoints": true
     }
   ]
 }

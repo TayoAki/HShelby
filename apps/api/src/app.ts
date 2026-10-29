@@ -11,6 +11,7 @@ import { appRoutes } from "./routes/apps";
 import { conversationRoutes, deviceRoutes } from "./routes/inbox";
 import { pushRoutes } from "./routes/push";
 import { sdkRoutes } from "./routes/sdk";
+import { telegramSettingsRoutes, telegramWebhookRoutes } from "./routes/telegram";
 
 export function createApp(deps: Deps) {
   const app = new Hono<AppEnv>();
@@ -58,9 +59,16 @@ export function createApp(deps: Deps) {
   api.route("/", accountRoutes(deps));
   api.route("/apps", appRoutes(deps));
   api.route("/apps", pushRoutes(deps));
+  api.route("/apps", telegramSettingsRoutes(deps));
   api.route("/conversations", conversationRoutes(deps));
   api.route("/devices", deviceRoutes(deps));
   app.route("/api", api);
+
+  // Webhooks from third parties, each authenticated its own way.
+  const webhooks = new Hono();
+  webhooks.use("*", limitBody(256));
+  webhooks.route("/telegram", telegramWebhookRoutes(deps));
+  app.route("/webhooks", webhooks);
 
   // SDK API: device access tokens (see routes/sdk.ts).
   const v1 = new Hono<SdkEnv>();

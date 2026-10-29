@@ -37,6 +37,10 @@ export const errorCodes = [
   "app_store_id_required",
   "card_repeat_unconfirmed",
   "not_a_card",
+  "telegram_invalid_token",
+  "telegram_chat_unavailable",
+  "telegram_bot_in_use",
+  "telegram_not_connected",
   "internal_error",
 ] as const;
 export type ErrorCode = (typeof errorCodes)[number];
@@ -124,3 +128,4 @@ export * from "./messaging";
 export * from "./photos";
 export * from "./push";
 export * from "./realtime";
+export * from "./telegram";

@@ -3,6 +3,7 @@ import { uuidv7 } from "@hshelby/core";
 import { apps, conversations, messages, users, type Db, type Tx } from "@hshelby/db";
 import { and, asc, count, desc, eq, gt, isNull, lt, sql } from "drizzle-orm";
 import { ApiError, isUniqueViolation, notFound } from "./errors";
+import type { Jobs } from "./jobs";
 import { linkAttachments } from "./photos";
 import { publishLive } from "./realtime/events";
 
@@ -28,6 +29,7 @@ const live = (deviceId: string) => and(eq(conversations.deviceId, deviceId), isN
  */
 export async function appendUserMessage(
   db: Db,
+  jobs: Pick<Jobs, "notifyTeam">,
   input: { organizationId: string; appId: string; deviceId: string; clientId: string; text: string; attachmentIds: string[] },
   verifyAttachments: () => Promise<void> = async () => {},
 ): Promise<Appended> {
@@ -78,6 +80,7 @@ export async function appendUserMessage(
         })
         .returning();
       await linkAttachments(tx, { messageId: message!.id, deviceId: input.deviceId, uploadedBy: "user", ids: input.attachmentIds });
+      await jobs.notifyTeam(tx, message!.id);
       await publishLive(tx, {
         type: "message",
         organizationId: input.organizationId,
@@ -107,12 +110,15 @@ export async function appendUserMessage(
 export type AgentMessageInput = {
   organizationId: string;
   conversationId: string;
-  authorUserId: string;
-  clientId: string;
+  /** The teammate; null for a generic team message (Telegram in a workspace of several, automations, AI). */
+  authorUserId: string | null;
+  /** Makes a teammate's resend idempotent; sources with their own dedupe (Telegram) pass null. */
+  clientId: string | null;
   text: string;
   attachmentIds: string[];
   /** A review or offer card (phase B7); plain text otherwise. */
   card?: StoredCard;
+  source?: "dashboard" | "telegram" | "automation" | "ai";
 };
 
 /**
@@ -124,15 +130,19 @@ export type AppendHooks = {
   after?: (tx: Tx, message: MessageRow, conversation: ConversationRow) => Promise<void>;
 };
 
-/** Appends a teammate's reply to a conversation of their organization and enqueues its push. */
+/**
+ * Appends a team reply to a conversation of the organization, enqueues its push and, unless it came from
+ * Telegram, its mirror there.
+ */
 export async function appendAgentMessage(
   db: Db,
-  jobs: { pushMessage(tx: Tx, messageId: string): Promise<void> },
+  jobs: Pick<Jobs, "pushMessage" | "notifyTeam">,
   input: AgentMessageInput,
   hooks: AppendHooks = {},
 ): Promise<Appended> {
   const replay = await findAgentReplay(db, input);
   if (replay) return replay;
+  const source = input.source ?? "dashboard";
 
   try {
     return await db.transaction(async (tx) => {
@@ -165,7 +175,7 @@ export async function appendAgentMessage(
           conversationId: conversation.id,
           seq: conversation.lastSeq,
           sender: "agent",
-          source: "dashboard",
+          source,
           authorUserId: input.authorUserId,
           clientId: input.clientId,
           kind: input.card ? input.card.type : "text",
@@ -181,6 +191,7 @@ export async function appendAgentMessage(
         ids: input.attachmentIds,
       });
       await jobs.pushMessage(tx, message!.id);
+      if (source !== "telegram") await jobs.notifyTeam(tx, message!.id);
       await publishLive(tx, {
         type: "message",
         organizationId: conversation.organizationId,
@@ -212,8 +223,9 @@ async function findUserReplay(db: Db, deviceId: string, clientId: string): Promi
 
 export async function findAgentReplay(
   db: Db,
-  input: { organizationId: string; conversationId: string; authorUserId: string; clientId: string },
+  input: { organizationId: string; conversationId: string; authorUserId: string | null; clientId: string | null },
 ): Promise<Appended | null> {
+  if (!input.authorUserId || !input.clientId) return null;
   const [row] = await db
     .select({ message: messages, conversation: conversations })
     .from(messages)

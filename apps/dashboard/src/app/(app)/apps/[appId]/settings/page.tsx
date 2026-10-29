@@ -8,6 +8,7 @@ import { useEffect, useState } from "react";
 import { AppHeader } from "@/components/AppHeader";
 import { PaywallsCard, ReviewsAndOffersCard } from "@/components/CardSettingsCards";
 import { PushSettingsCard } from "@/components/PushSettingsCard";
+import { TelegramSettingsCard } from "@/components/TelegramSettingsCard";
 import { CopyBlock, secondaryButton, SettingsCard, SwitchRow } from "@/components/settings";
 import { AppIcon, ErrorNote, Spinner } from "@/components/ui";
 import { api } from "@/lib/api";
@@ -183,6 +184,7 @@ export default function AppSettingsPage() {
           </SettingsCard>
 
           <PushSettingsCard app={app} admin={admin} />
+          <TelegramSettingsCard app={app} admin={admin} />
           <ReviewsAndOffersCard app={app} admin={admin} onAppChange={setApp} />
           <PaywallsCard app={app} />
         </main>

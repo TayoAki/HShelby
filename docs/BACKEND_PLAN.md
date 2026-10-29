@@ -27,7 +27,7 @@ Why one Postgres for everything at the start: messages, the job queue, realtime 
 
 ## Status
 
-**B0–B7 run on Railway staging** (billing is switched off there until the Stripe test secret key is set) (project `hshelby`, environment `staging`): dashboard at `https://dashboard-staging-0dee.up.railway.app`, API at `https://api-staging-f8f8.up.railway.app`.
+**B0–B8 run on Railway staging** (billing is switched off there until the Stripe test secret key is set) (project `hshelby`, environment `staging`): dashboard at `https://dashboard-staging-0dee.up.railway.app`, API at `https://api-staging-f8f8.up.railway.app`.
 
 B1 (messaging core) as built:
 
@@ -114,6 +114,20 @@ B7 (cards) as built:
 - **Simulator:** `--paywall id=Title` (repeatable) reports paywalls; in `--chat`, cards print with their button and `/tap` sends the click receipt.
 - **Done-when tests** (`apps/api/test/cards.test.ts`): an offer for an unreported (or unpresentable, or no longer reported) paywall is refused; five racing taps record exactly one first tap, and later taps return it. The same file covers the registry, malformed reports, the review link and App Store ID permissions, the repeat guard, resends, stats and settings.
 - **Deferred:** per-language templates and "Suggested" offer text in the user's language; "Reset support" (which would keep card history).
+- **Checked on staging:** the browser walkthrough (settings, an offer, the tap, the repeat guard, stats) runs against the staging dashboard; the tap receipt shows in the thread about 370 ms after the tap.
+
+B8 (Telegram) as built:
+
+- **Package** `packages/telegram`: a Bot API client (Telegram's errors as data: retry_after, migrate_to_chat_id, chat gone, thread gone), message formatting (HTML, escaped, cut at 3,500 characters), the delivery logic shared by the API and the worker, and `@hshelby/telegram/testing`, a fake Bot API with bots, chats, topics, reactions, webhooks with secret tokens, a per-chat rate limit, migrations and planned failures.
+- **Connecting** (`PUT /api/apps/:id/telegram {botToken, chatId}`, admins, audited): checks the token (`getMe`) and the chat (`getChat`; channels refused), sets the bot's webhook to `/webhooks/telegram/<bot>` with a fresh secret token (stored as SHA-256), posts a confirmation, and stores the connection. The token is encrypted with `ENC_KEYS` and never returned. A bot belongs to one workspace (`telegram_bot_in_use`, 409) but can serve several of its apps, since Telegram allows one webhook per bot. `PATCH` pauses or switches topics (refused unless the chat is a forum and the bot can manage topics), `POST …/test` posts a test, `DELETE` disconnects and, for a bot nothing else uses, removes the webhook and forgets the token.
+- **Out** (jobs `team.notify` → `telegram.send`): every message enqueues `team.notify` in its own transaction. A customer's message is posted as "**App · User** ✓" (the check for verified users) with its text, "📷 Photo" for photos (files aren't forwarded) and a description for cards. A reply written in the inbox, by an automation or the AI is mirrored silently as a Telegram reply under the customer's latest notification. Nothing is posted while paused, and nothing missed is replayed.
+- **Pacing:** at most one post per chat every `TELEGRAM_CHAT_INTERVAL_MS` (3 s, i.e. Telegram's ~20 a minute per group). `team.notify` reserves the chat's next slot (`telegram_chats.next_slot_at`) and schedules the send there; each send also waits, under the chat's row lock, until the interval since the chat's last send has passed, so retries and catch-up after downtime can't burst. A 429 pushes the chat's slot back by `retry_after` and reschedules the job. One worker takes sends in slot order, so a chat's posts keep the order they were written in.
+- **In** (`POST /webhooks/telegram/:botId`, secret token checked in constant time): a team member's Reply to a notification or a mirrored answer (or, with topics, any message in the customer's topic) becomes a team reply in the app (`source: telegram`), with its push. Only plain text up to 4,000 characters; bots, anonymous admins, forwards, media and edits are ignored. The reply is attributed to the workspace's only member, or to the team when there are several. The bot reacts 👍 once it's saved, or answers "Reply sent." where reactions are off; too-long replies and replies while the subscription is inactive get a short notice instead. A redelivered update is a no-op (`telegram_posts` key).
+- **Chat changes:** a group upgraded to a supergroup is followed, both from the migration update and from the error on the next post, and posts, topics and the connection move with it. A bot removed from the chat records the reason on the connection, shown in settings. With topics on, each customer gets a forum topic "App · User" (renamed when the name changes, recreated if deleted); without the rights, posts fall back to the main chat and the connection says why.
+- **Worker queues:** `push.send`, `team.notify` and `telegram.send` now fetch up to 10 jobs at a time and keep fetching while the queue returns full batches, settling each job on its own (one failure retries only that job). Before, pg-boss waited for its 30 s backstop poll after a NOTIFY wake-up, so a burst of replies could take minutes.
+- **Dashboard:** a Telegram card on the app's settings page (BotFather steps, connect, status, pause, topics, test, disconnect, the last refusal), and "via Telegram" on replies sent from there.
+- **Done-when tests:** `apps/api/test/telegram.test.ts` (a Reply in Telegram lands in the app chat once, with the 👍; connecting, refusals, pausing, mirrors, routing and what's ignored, too-long replies, a forged secret, reactions off, several teammates, a migrated group, a removed bot, topics, a 429) and `apps/worker/test/telegram.test.ts` (a burst of 50 customer messages is posted in order with no 429 from a fake Telegram that allows 20 per window, scaled to a 110 ms interval).
+- **Not checked here:** a real Telegram group (needs a bot token from BotFather). Everything up to Telegram's API runs against the fake; on staging, connecting with a made-up token gets Telegram's own refusal.
 
 Where B0 differs from the plan below:
 
@@ -126,7 +140,7 @@ Railway layout:
 | Service | Build / start | Notes |
 |---|---|---|
 | `api` | `npm run build -w @hshelby/api` / `npm run start -w @hshelby/api` | Pre-deploy `npm run migrate -w @hshelby/api`; healthcheck `/health` (runs `select 1`). |
-| `worker` | same with `@hshelby/worker` | pg-boss: `push.send`, nightly cleanup at 03:00 UTC, deleted-app purge every 15 minutes, unsent-upload sweep and `billing.sync` hourly. |
+| `worker` | same with `@hshelby/worker` | pg-boss: `push.send`, `team.notify` and `telegram.send`, nightly cleanup at 03:00 UTC, deleted-app purge every 15 minutes, unsent-upload sweep and `billing.sync` hourly. |
 | `dashboard` | same with `@hshelby/dashboard` | Healthcheck `/health`. Proxies `/api/*` to the API over the private network, so auth cookies are first-party. |
 | `Postgres` | Railway template | |
 | `photos` | Railway Bucket | Private; read and written only through presigned URLs and the API. |
@@ -146,6 +160,7 @@ Variables (secrets are set in Railway only, never in the repo):
 | worker | `DATABASE_URL` | `${{Postgres.DATABASE_URL}}` |
 | worker | `ENC_KEYS` | `${{api.ENC_KEYS}}` (decrypts apps' APNs keys) |
 | worker | `STRIPE_SECRET_KEY` | `${{api.STRIPE_SECRET_KEY}}` (billing sync; optional) |
+| api, worker | `TELEGRAM_CHAT_INTERVAL_MS` | Optional: minimum gap between posts in one Telegram chat (default 3000) |
 | api, worker | `S3_ENDPOINT`, `S3_REGION`, `S3_BUCKET`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY` | `${{photos.ENDPOINT}}`, `${{photos.REGION}}`, `${{photos.BUCKET}}`, `${{photos.ACCESS_KEY_ID}}`, `${{photos.SECRET_ACCESS_KEY}}` (photos are off without them) |
 | dashboard | `API_INTERNAL_URL` | `http://${{api.RAILWAY_PRIVATE_DOMAIN}}:${{api.PORT}}`, read at build time |
 
@@ -447,7 +462,7 @@ Each phase ends with acceptance tests that must pass in CI and on staging.
 | **MVP backend** | | | **≈ 6–7 wks** |
 | **B6 Realtime** (done, see Status) | WS gateway, LISTEN/NOTIFY fan-out, typing, presence, skip-push-when-in-chat | Two API instances: a reply sent via instance A reaches a socket on B in < 300 ms | 1–1.5 wks |
 | **B7 Cards** (done, see Status) | Review + offer cards, paywall registry from device reports, click receipts, stats | An offer card for an unreported paywall is refused; the first tap is recorded once | 1 wk |
-| **B8 Telegram** | Connect bot, notify, reply mapping, reactions, supergroup migration, throttle | Replying in Telegram lands in the app chat; 50 bursts respect the per-chat limit | 1.5 wks |
+| **B8 Telegram** (done, see Status) | Connect bot, notify, reply mapping, reactions, supergroup migration, throttle | Replying in Telegram lands in the app chat; 50 bursts respect the per-chat limit | 1.5 wks |
 | **B9 Appearance & assets** | Draft/publish remote appearance, asset library (PNG ≤ 512 px), team photos | SDK fetches the published version; drafts never leak | 1 wk |
 | **B10 Subscriptions + automations** | Four provider receivers, normalization, matching, automation builder API, run engine with waits, suppression, holds, results | Replaying each provider's fixture set yields the expected canonical events; a "cancelled → offer tomorrow 10:00 local" run fires at the right UTC time across 3 time zones | 3 wks |
 | **B11 AI replies** | See §11 | Eval set passes the bar you set; handover never double-replies | 2–3 wks |
