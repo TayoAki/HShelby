@@ -21,6 +21,7 @@ export const errorCodes = [
   "validation_failed",
   "no_active_organization",
   "app_already_added",
+  "owner_mismatch",
   "app_store_unavailable",
   "billing_not_configured",
   "device_blocked",
@@ -142,6 +143,7 @@ export * from "./billing";
 export * from "./cards";
 export * from "./identity";
 export * from "./messaging";
+export * from "./partners";
 export * from "./photos";
 export * from "./push";
 export * from "./realtime";

@@ -8,3 +8,4 @@ export * from "./telegram";
 export * from "./appearance";
 export * from "./automations";
 export * from "./ai";
+export * from "./partners";

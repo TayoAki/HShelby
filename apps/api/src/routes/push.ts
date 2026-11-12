@@ -27,6 +27,62 @@ const toDto = (c: PushConfigRow): PushConfig => ({
   updatedAt: c.updatedAt.toISOString(),
 });
 
+/**
+ * Stores an app's APNs key and notification settings (a new key is checked and encrypted; leaving it out keeps the
+ * stored one), audited. Shared by the dashboard and the partner API.
+ */
+export async function savePushConfig(
+  deps: Pick<Deps, "db" | "keyring">,
+  target: { appId: string; organizationId: string; userId: string | null; partner?: string },
+  input: PushConfigInput,
+): Promise<PushConfigRow> {
+  const { db } = deps;
+  const parsed = PushConfigInput.parse(input);
+  const [existing] = await db.select().from(pushConfigs).where(eq(pushConfigs.appId, target.appId));
+
+  let p8Enc = existing?.p8Enc;
+  if (parsed.p8) {
+    try {
+      await assertValidP8(parsed.p8);
+    } catch {
+      throw new ApiError(400, "invalid_push_key", "That isn't an APNs auth key. Upload the .p8 file from your Apple Developer account.");
+    }
+    p8Enc = encryptSecret(parsed.p8, deps.keyring);
+  }
+  if (!p8Enc) throw new ApiError(400, "validation_failed", "p8: upload the .p8 key file");
+
+  const values = {
+    teamId: parsed.teamId,
+    keyId: parsed.keyId,
+    bundleId: parsed.bundleId,
+    p8Enc,
+    titleTemplate: parsed.titleTemplate,
+    bodyTemplate: parsed.bodyTemplate,
+    senderName: parsed.senderName,
+    showPreview: parsed.showPreview,
+    sound: parsed.sound,
+    // new credentials deserve a fresh verdict from APNs
+    ...((parsed.p8 || parsed.teamId !== existing?.teamId || parsed.keyId !== existing?.keyId) && { issue: null, issueAt: null }),
+    updatedAt: new Date(),
+  };
+  return db.transaction(async (tx) => {
+    const [row] = await tx
+      .insert(pushConfigs)
+      .values({ appId: target.appId, ...values })
+      .onConflictDoUpdate({ target: pushConfigs.appId, set: values })
+      .returning();
+    await tx.insert(auditEvents).values({
+      id: uuidv7(),
+      organizationId: target.organizationId,
+      userId: target.userId,
+      action: parsed.p8 ? "app.push.key_uploaded" : "app.push.updated",
+      target: target.appId,
+      ...(target.partner && { metadata: { partner: target.partner } }),
+    });
+    return row!;
+  });
+}
+
 /** An app's push notification settings, under /api/apps/:id/push. Changes are admin-only and audited. */
 export function pushRoutes(deps: Deps) {
   const { db } = deps;
@@ -46,48 +102,7 @@ export function pushRoutes(deps: Deps) {
     const input = await parseJson(c, PushConfigInput);
     const org = c.get("org");
     const app = await findOrgApp(db, org.id, c.req.param("id"));
-    const [existing] = await db.select().from(pushConfigs).where(eq(pushConfigs.appId, app.id));
-
-    let p8Enc = existing?.p8Enc;
-    if (input.p8) {
-      try {
-        await assertValidP8(input.p8);
-      } catch {
-        throw new ApiError(400, "invalid_push_key", "That isn't an APNs auth key. Upload the .p8 file from your Apple Developer account.");
-      }
-      p8Enc = encryptSecret(input.p8, deps.keyring);
-    }
-    if (!p8Enc) throw new ApiError(400, "validation_failed", "p8: upload the .p8 key file");
-
-    const values = {
-      teamId: input.teamId,
-      keyId: input.keyId,
-      bundleId: input.bundleId,
-      p8Enc,
-      titleTemplate: input.titleTemplate,
-      bodyTemplate: input.bodyTemplate,
-      senderName: input.senderName,
-      showPreview: input.showPreview,
-      sound: input.sound,
-      // new credentials deserve a fresh verdict from APNs
-      ...((input.p8 || input.teamId !== existing?.teamId || input.keyId !== existing?.keyId) && { issue: null, issueAt: null }),
-      updatedAt: new Date(),
-    };
-    const config = await db.transaction(async (tx) => {
-      const [row] = await tx
-        .insert(pushConfigs)
-        .values({ appId: app.id, ...values })
-        .onConflictDoUpdate({ target: pushConfigs.appId, set: values })
-        .returning();
-      await tx.insert(auditEvents).values({
-        id: uuidv7(),
-        organizationId: org.id,
-        userId: c.get("user").id,
-        action: input.p8 ? "app.push.key_uploaded" : "app.push.updated",
-        target: app.id,
-      });
-      return row!;
-    });
+    const config = await savePushConfig(deps, { appId: app.id, organizationId: org.id, userId: c.get("user").id }, input);
     return c.json({ config: toDto(config) });
   });
 

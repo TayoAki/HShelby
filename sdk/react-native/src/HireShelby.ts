@@ -149,8 +149,8 @@ export const HireShelby = {
   // Push
 
   /**
-   * Forwards the APNs device token, so replies reach the user as notifications. With expo-notifications:
-   * `HireShelby.setPushToken((await Notifications.getDevicePushTokenAsync()).data)`. The SDK never asks for permission.
+   * Forwards the APNs device token yourself. Not needed by default: the SDK picks the token up whenever the app has
+   * notification permission (`automaticPushToken`). The SDK never asks for permission.
    */
   setPushToken(token: string, environment: "automatic" | "sandbox" | "production" = "automatic"): void {
     call(() => sdk()?.setPushToken(token, environment));

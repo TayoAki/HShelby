@@ -112,5 +112,9 @@ cd sdk/react-native && npm ci && npm test && npm publish --access public
 ```
 
 Release the iOS SDK and the npm package with the same version. Then set `RN_PACKAGE=@hireshelby/react-native` on the
-api. The package's `repository` field points to `github.com/tayoaki/hireshelby-react-native`; create that public
-repository (or change the field) before the first publish, so npm's links work.
+api. From this session or a phone: add the `NPM_TOKEN` repository secret (an npm granular access token with read and
+write access to `@hireshelby`, bypassing 2FA) and run the **Publish React Native SDK** workflow
+(`.github/workflows/publish-react-native.yml`); it checks the two versions match and skips a version already on npm.
+
+The session's git proxy refuses tag pushes, so tag the iOS release on GitHub (Releases → Draft a new release → tag
+`0.1.0` on `main`) when it's published from a cloud session.

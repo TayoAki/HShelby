@@ -27,6 +27,8 @@ export const LIMITS = {
   track: { name: "track", max: 60, windowMs: MINUTE },
   /** The public appearance document and library images, per IP address. */
   publicPerIp: { name: "public-ip", max: 300, windowMs: MINUTE },
+  /** Partner API calls, per partner. */
+  partner: { name: "partner", max: 300, windowMs: MINUTE },
   /** Deliveries to one webhook URL (a provider retrying a backlog sends bursts). */
   webhook: { name: "webhook", max: 1200, windowMs: MINUTE },
 } satisfies Record<string, Limit>;

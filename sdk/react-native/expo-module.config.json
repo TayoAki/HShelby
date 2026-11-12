@@ -1,6 +1,13 @@
 {
-  "platforms": ["apple"],
+  "platforms": [
+    "apple"
+  ],
   "apple": {
-    "modules": ["HireShelbyModule"]
+    "modules": [
+      "HireShelbyModule"
+    ],
+    "appDelegateSubscribers": [
+      "HireShelbyAppDelegateSubscriber"
+    ]
   }
 }

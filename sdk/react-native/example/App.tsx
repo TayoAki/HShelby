@@ -21,10 +21,8 @@ export default function App() {
     HireShelby.identify({ userId: "example-user", name: "Example User" });
     HireShelby.reportPaywalls([{ id: "pro_yearly", title: "Pro yearly" }]);
 
-    // forward the APNs token if the app already has permission; the SDK never asks
-    Notifications.getPermissionsAsync().then(async ({ granted }) => {
-      if (granted) HireShelby.setPushToken((await Notifications.getDevicePushTokenAsync()).data);
-    });
+    // the SDK sends the APNs token itself once the app has permission; asking is the app's call
+    void Notifications.requestPermissionsAsync();
     // a tap on a Hire Shelby notification opens the chat
     const responses = Notifications.addNotificationResponseReceivedListener((response) => {
       void HireShelby.handleNotification(response);

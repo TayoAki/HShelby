@@ -33,12 +33,8 @@
     "hireshelby"
   ],
   "homepage": "https://hireshelby.com",
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/tayoaki/hireshelby-react-native.git"
-  },
   "bugs": {
-    "url": "https://github.com/tayoaki/hireshelby-react-native/issues"
+    "email": "support@hireshelby.com"
   },
   "author": "HireShelby",
   "license": "MIT",

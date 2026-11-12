@@ -9,6 +9,8 @@ import { safeNext, useSearch } from "@/lib/use-search";
 export default function SignUpPage() {
   // a `next` (an invitation being accepted) survives switching to sign-in and wins over onboarding
   const search = useSearch();
+  // an invitation link (from a teammate or an app builder) names the address it was sent to
+  const invitedEmail = new URLSearchParams(search).get("email") ?? "";
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -43,7 +45,7 @@ export default function SignUpPage() {
     >
       <form onSubmit={onSubmit} className="space-y-4">
         <Field label="Name" name="name" autoComplete="name" required maxLength={100} />
-        <Field label="Email" name="email" type="email" autoComplete="email" required />
+        <Field key={invitedEmail} label="Email" name="email" type="email" autoComplete="email" required defaultValue={invitedEmail} />
         <Field label="Password" name="password" type="password" autoComplete="new-password" required minLength={10} placeholder="At least 10 characters" />
         {error && <ErrorNote>{error}</ErrorNote>}
         <PrimaryButton type="submit" disabled={busy}>

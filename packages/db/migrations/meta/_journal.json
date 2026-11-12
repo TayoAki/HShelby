@@ -99,6 +99,13 @@
       "when": 1794453311694,
       "tag": "0013_app_review",
       "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1794456595828,
+      "tag": "0014_partners",
+      "breakpoints": true
     }
   ]
 }

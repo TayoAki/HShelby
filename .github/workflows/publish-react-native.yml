@@ -1,0 +1,65 @@
+name: Publish React Native SDK
+
+# Publishes sdk/react-native to npm as @hireshelby/react-native, at the version in its package.json. Run it from the
+# Actions tab (or the API). Needs the repository secret NPM_TOKEN: an npm granular access token with read and write
+# access to the @hireshelby scope (and "bypass 2FA" if the npm account requires 2FA for writes).
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Pack and check, without publishing"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-react-native
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: sdk/react-native
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+          cache: npm
+          cache-dependency-path: sdk/react-native/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      # the iOS SDK the package ships must be the same release
+      - run: |
+          RN=$(node -p "require('./package.json').version")
+          IOS=$(sed -n 's/.*static let current = "\(.*\)".*/\1/p' ../ios/Sources/HireShelbyCore/Support/Support.swift)
+          echo "react-native $RN, ios $IOS"
+          test "$RN" = "$IOS"
+      - name: Publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          NAME=$(node -p "require('./package.json').name")
+          VERSION=$(node -p "require('./package.json').version")
+          if npm view "$NAME@$VERSION" version >/dev/null 2>&1; then
+            echo "$NAME@$VERSION is already on npm; bump the version to publish again."
+            exit 0
+          fi
+          if [ "$DRY_RUN" = "true" ]; then
+            npm publish --access public --dry-run
+            exit 0
+          fi
+          if [ -z "$NODE_AUTH_TOKEN" ]; then
+            echo "::error::Add the NPM_TOKEN repository secret (Settings → Secrets and variables → Actions)."
+            exit 1
+          fi
+          npm publish --access public
+          echo "Published https://www.npmjs.com/package/$NAME/v/$VERSION"

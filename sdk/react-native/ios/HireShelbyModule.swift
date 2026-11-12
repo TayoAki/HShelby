@@ -31,6 +31,7 @@ public final class HireShelbyModule: Module {
       MainActor.assumeIsolated {
         self.dismissesChatForPaywall = options.dismissesChatForPaywall
         HireShelby.configure(appId: appId, options: options.sdkOptions)
+        PushTokenRelay.didConfigure(enabled: options.automaticPushToken)
       }
     }.runOnQueue(.main)
 
@@ -220,6 +221,8 @@ struct OptionsRecord: Record {
   /// "inApp" (Apple's rating prompt) or "appStorePage".
   @Field var reviewPrompt: String?
   @Field var dismissesChatForPaywall: Bool = true
+  /// Forward the APNs token to Hire Shelby without app code (see HireShelbyAppDelegateSubscriber).
+  @Field var automaticPushToken: Bool = true
 
   var sdkOptions: HireShelby.Options {
     let levels: [String: HireShelbyLogLevel] = ["off": .off, "error": .error, "info": .info, "debug": .debug]

@@ -14,6 +14,7 @@ import { appearanceRoutes, assetRoutes, profilePhotoRoutes, publicAppearanceRout
 import { appRoutes } from "./routes/apps";
 import { automationRoutes } from "./routes/automations";
 import { integrationRoutes, providerWebhookRoutes } from "./routes/integrations";
+import { partnerRoutes } from "./routes/partner";
 import { conversationRoutes, deviceRoutes } from "./routes/inbox";
 import { pushRoutes } from "./routes/push";
 import { sdkRoutes } from "./routes/sdk";
@@ -91,6 +92,12 @@ export function createApp(deps: Deps) {
   webhooks.route("/telegram", telegramWebhookRoutes(deps));
   webhooks.route("/", providerWebhookRoutes(deps, { roots: deps.appStoreRoots }));
   app.route("/webhooks", webhooks);
+
+  // Partner API: app builders creating apps for their users, with a partner key (see routes/partner.ts).
+  const partner = new Hono();
+  partner.use("*", limitBody(32));
+  partner.route("/", partnerRoutes(deps));
+  app.route("/partner/v1", partner);
 
   // SDK API: device access tokens (see routes/sdk.ts).
   const v1 = new Hono<SdkEnv>();

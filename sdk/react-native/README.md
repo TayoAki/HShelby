@@ -81,21 +81,21 @@ Never send health data, passwords, precise location or payment details.
 
 ### 4. Push notifications
 
-Upload your APNs key in the dashboard (the app's Push settings). The SDK never asks for permission; forward the
-token if the app already has it. With expo-notifications:
+Upload your APNs key in the dashboard (the app's Push settings), or have your app builder do it. The rest is
+automatic: whenever your app has notification permission, the SDK sends the device token to Hire Shelby itself.
+It never asks for permission; your app does, when it fits (with expo-notifications:
+`Notifications.requestPermissionsAsync()`).
+
+To open the chat when someone taps a reply's notification, and to skip the banner while the chat already shows the
+message, with expo-notifications:
 
 ```ts
 import * as Notifications from "expo-notifications";
 
-const { granted } = await Notifications.getPermissionsAsync();
-if (granted) HireShelby.setPushToken((await Notifications.getDevicePushTokenAsync()).data);
-
-// a tap on a Hire Shelby notification opens the chat
 Notifications.addNotificationResponseReceivedListener((response) => {
   void HireShelby.handleNotification(response); // false for your own notifications
 });
 
-// no banner while the chat already shows the message
 Notifications.setNotificationHandler({
   handleNotification: async (notification) => {
     const show = HireShelby.shouldShowNotification(notification);
@@ -103,6 +103,9 @@ Notifications.setNotificationHandler({
   },
 });
 ```
+
+To send the token yourself instead, configure with `automaticPushToken: false` and call
+`HireShelby.setPushToken((await Notifications.getDevicePushTokenAsync()).data)`.
 
 The team's replies always push. Offers and automations' messages are promotional, so they reach the lock screen
 only for people who opted in to promotional notifications in your app (Apple's guideline 4.5.4); they always
@@ -181,7 +184,7 @@ await HireShelby.setAIRepliesAllowed(value); // only when the person flips it
 | `useUnreadCount()` / `getUnreadCount()` / `addUnreadCountListener(fn)` | The unread badge |
 | `addEventListener(fn)` / `useHireShelbyEvent(fn)` / `useIsChatOpen()` | SDK events |
 | `setPaywallHandler(fn)` / `reportPaywalls(list)` | Offers |
-| `setPushToken(hex)` / `clearPushToken()` / `setPromotionalPushAllowed(bool)` | Push |
+| `setPushToken(hex)` / `clearPushToken()` / `setPromotionalPushAllowed(bool)` | Push (the token is sent automatically by default) |
 | `handleNotification(n)` / `shouldShowNotification(n)` / `isHireShelbyNotification(n)` | Notifications |
 | `reportStoreKit(state)` / `reportStoreKitEntitlements()` / `track(event)` | Subscriptions and automations |
 | `getAIReplies()` / `setAIRepliesAllowed(bool)` | AI replies |
@@ -189,7 +192,8 @@ await HireShelby.setAIRepliesAllowed(value); // only when the person flips it
 
 Options: `theme` (`accentColor`, `onAccentColor`, `backgroundColor`, `incomingBubbleColor`, `incomingTextColor`,
 `fontName`, `colorScheme`, `title`, `welcomeTitle`, `welcomeText`, `welcomeIcon`, `showsCloseButton`),
-`apiBaseUrl`, `logLevel`, `updatesAppBadge`, `usesRemoteAppearance`, `reviewPrompt`, `dismissesChatForPaywall`.
+`apiBaseUrl`, `logLevel`, `updatesAppBadge`, `usesRemoteAppearance`, `reviewPrompt`, `dismissesChatForPaywall`,
+`automaticPushToken`.
 
 ## Development
 

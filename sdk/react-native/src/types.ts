@@ -48,6 +48,11 @@ export type Options = {
    * chat's sheet. Defaults to true; turn off if your paywall SDK presents natively on top.
    */
   dismissesChatForPaywall?: boolean;
+  /**
+   * Send the APNs device token to Hire Shelby automatically, whenever the app has notification permission (the
+   * SDK never asks for it). Defaults to true; turn off to call `setPushToken` yourself.
+   */
+  automaticPushToken?: boolean;
 };
 
 /** Who the user is, as your app knows them. These labels are unverified; `{ token }` verifies them. */

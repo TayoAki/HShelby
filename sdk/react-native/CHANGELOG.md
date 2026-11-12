@@ -13,4 +13,6 @@ All notable changes to `@hireshelby/react-native`. The format follows
   events, paywall handler, push (`setPushToken`, `handleNotification`, `shouldShowNotification` for
   expo-notifications), `setPromotionalPushAllowed`, paywalls and StoreKit reports, `track`, AI replies
   (`getAIReplies`, `setAIRepliesAllowed`).
+- The APNs device token reaches Hire Shelby without app code whenever the app has notification permission
+  (`automaticPushToken`, on by default).
 - Safe everywhere: on Android, the web and Expo Go calls do nothing and `isSupported` is false.

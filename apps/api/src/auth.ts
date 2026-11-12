@@ -19,12 +19,13 @@ import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { APIError, createAuthMiddleware, getSessionFromCtx } from "better-auth/api";
 import { organization } from "better-auth/plugins/organization";
-import { and, asc, eq, gt, inArray, isNull, sql } from "drizzle-orm";
+import { and, asc, eq, gt, inArray, isNull, like, sql } from "drizzle-orm";
 import type { Logger } from "pino";
 import type Stripe from "stripe";
 import type { Billing } from "./billing";
 import { invitationEmail, resetPasswordEmail, type Mailer } from "./email";
 import type { Env } from "./env";
+import { PARTNER_EMAIL_DOMAIN } from "./partners";
 
 const slugify = (value: string) =>
   value
@@ -46,6 +47,49 @@ export async function isOrgAdmin(db: Db, userId: string, organizationId: string)
 type AuthDeps = { db: Db; env: Env; logger: Logger; stripe: Stripe | null; billing: Billing; mailer: Mailer };
 
 export function createAuth({ db, env, logger, stripe: stripeClient, billing, mailer }: AuthDeps) {
+  /** Accepts the new user's pending invitations from partners' service accounts; false when there are none. */
+  async function joinPartnerWorkspaces(user: { id: string; email: string }) {
+    const now = new Date();
+    return db.transaction(async (tx) => {
+      const pending = await tx
+        .select({ id: invitations.id, organizationId: invitations.organizationId, role: invitations.role })
+        .from(invitations)
+        .innerJoin(users, eq(users.id, invitations.inviterId))
+        .where(
+          and(
+            eq(sql`lower(${invitations.email})`, user.email.toLowerCase()),
+            eq(invitations.status, "pending"),
+            gt(invitations.expiresAt, now),
+            like(users.email, `%@${PARTNER_EMAIL_DOMAIN}`),
+          ),
+        )
+        .orderBy(asc(invitations.createdAt));
+      if (pending.length === 0) return false;
+      for (const invitation of pending) {
+        await tx
+          .insert(members)
+          .values({ id: uuidv7(), organizationId: invitation.organizationId, userId: user.id, role: invitation.role ?? "owner" })
+          .onConflictDoNothing({ target: [members.organizationId, members.userId] });
+        await tx.update(invitations).set({ status: "accepted" }).where(eq(invitations.id, invitation.id));
+        await tx.insert(auditEvents).values({
+          id: uuidv7(),
+          organizationId: invitation.organizationId,
+          userId: user.id,
+          action: "member.added",
+          target: user.id,
+          metadata: { email: user.email, role: invitation.role ?? "owner", via: "partner" },
+        });
+      }
+      // sign-up made its session before this hook: open it on the partner's workspace
+      await tx
+        .update(sessions)
+        .set({ activeOrganizationId: pending[0]!.organizationId })
+        .where(and(eq(sessions.userId, user.id), isNull(sessions.activeOrganizationId)));
+      return true;
+    });
+  }
+
+
   const dashboardUrl = env.BETTER_AUTH_URL.replace(/\/$/, "");
   const trustedOrigins = [env.BETTER_AUTH_URL, ...(env.TRUSTED_ORIGINS?.split(",").map((s) => s.trim()) ?? [])];
   const audit = (organizationId: string, userId: string | null, action: string, target: string, metadata: Record<string, unknown>) =>
@@ -190,8 +234,10 @@ export function createAuth({ db, env, logger, stripe: stripeClient, billing, mai
               });
             }
           },
-          // Every account starts with its own workspace, so onboarding can go straight to "Add app".
+          // Every account starts with its own workspace, so onboarding can go straight to "Add app". An owner a
+          // partner (an app builder) invited joins the partner's workspace for them instead, where their apps are.
           async after(user) {
+            if (await joinPartnerWorkspaces(user)) return;
             const organizationId = uuidv7();
             const name = `${user.name.split(" ")[0] || "My"}'s workspace`;
             await db.transaction(async (tx) => {

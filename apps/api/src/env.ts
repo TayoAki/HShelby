@@ -67,6 +67,13 @@ const EnvSchema = z.object({
    * workspace, as in the closed beta; "open" lets anyone sign up.
    */
   SIGNUPS: z.enum(["open", "invite"]).default("open"),
+  /**
+   * Partners allowed to use the partner API (src/routes/partner.ts), comma separated, each `id:key` with a slug
+   * id (`app-builder`) and a random key of at least 32 characters (`openssl rand -hex 32`). Unset: no partner API.
+   */
+  PARTNERS: optional,
+  /** How long a workspace a partner creates counts as subscribed (beta access), in days. */
+  PARTNER_BETA_DAYS: z.coerce.number().int().min(1).default(90),
   /** Multiplies every rate limit (src/rate-limit.ts); 0 turns them off. */
   RATE_LIMIT_SCALE: z.coerce.number().min(0).default(1),
 });
