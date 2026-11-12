@@ -1,0 +1,33 @@
+# Tags the version in Sources/HireShelbyCore/Support/Support.swift and publishes a GitHub release with its CHANGELOG
+# section (Swift Package Manager installs from tags). Run it from the Actions tab of github.com/tayoaki/hireshelby-ios
+# after the release commit lands on main; a version already tagged is left alone.
+name: Release
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Tag and publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION=$(sed -n 's/.*static let current = "\(.*\)".*/\1/p' Sources/HireShelbyCore/Support/Support.swift)
+          test -n "$VERSION"
+          if git rev-parse -q --verify "refs/tags/$VERSION" >/dev/null; then
+            echo "$VERSION is already tagged"
+            exit 0
+          fi
+          awk -v v="$VERSION" '$0 ~ "^## \\[" v "\\]" {f=1; next} /^## \[/ {f=0} f' CHANGELOG.md > notes.md
+          git tag "$VERSION" "$GITHUB_SHA"
+          git push origin "refs/tags/$VERSION"
+          gh release create "$VERSION" --verify-tag --title "Hire Shelby iOS SDK $VERSION" --notes-file notes.md
+          echo "Released $VERSION"
