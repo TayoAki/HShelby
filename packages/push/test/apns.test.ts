@@ -102,7 +102,7 @@ describe("notification content", () => {
         badge: 2,
         "thread-id": "c1",
       },
-      hshelby: { conversationId: "c1", messageId: "m1" },
+      hireshelby: { conversationId: "c1", messageId: "m1" },
     });
   });
 

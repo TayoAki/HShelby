@@ -66,3 +66,21 @@ One machine registering 1,000 devices trips the per-address registration limit (
 ## Rate limits
 
 Per API process, fixed windows (`apps/api/src/rate-limit.ts`). A client over a limit gets `429 rate_limited` with `Retry-After`. `RATE_LIMIT_SCALE` multiplies every limit (`0` turns them off; tests use it). With several api replicas each counts its own share, so the effective limit is replicas × limit; moving the counters to Postgres or Redis is a change to that one file.
+
+## Closed beta access
+
+Production runs with `SIGNUPS=invite`: only an address with a beta invite, or with a pending invitation to someone's workspace, can create an account; anyone else is told it's a closed beta and where to ask. A workspace with beta access counts as subscribed (replies, more apps, teammates) until its date, without paying and without taking a founder spot. Invites and access are granted by an operator, never from the dashboard, and grants and revokes go in the workspace's audit log.
+
+Invite the tester's email before they sign up (their workspace gets access the moment it's created), or grant an existing account (access goes to every workspace they own):
+
+```
+DATABASE_URL=… npx tsx apps/api/scripts/beta-access.ts --email tester@example.com --until 2027-03-31 --note "Indie dev, LockdList"
+DATABASE_URL=… npx tsx apps/api/scripts/beta-access.ts --email tester@example.com --revoke
+DATABASE_URL=… npx tsx apps/api/scripts/beta-access.ts --list
+```
+
+`--revoke` withdraws an unused invite too. `DATABASE_URL` is the environment's Postgres URL (Railway: the Postgres service's public URL, or run it with `railway run` in the environment). The billing page shows "Beta access until …"; after the date the workspace is an ordinary unsubscribed one and can subscribe.
+
+## Account email
+
+Password resets and team invitations go out through Resend when `RESEND_API_KEY` is set on the api (`EMAIL_FROM` names the sender; its domain, hireshelby.com, must be verified in Resend with the DNS records it shows). Without a key nothing is sent: a production api logs a warning per email, and an owner can still copy an invitation's link from the Team page and send it themselves. Reset links work once, for an hour, and a reset signs the account out everywhere else.

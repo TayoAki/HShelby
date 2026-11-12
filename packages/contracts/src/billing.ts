@@ -30,6 +30,8 @@ export const BillingState = z.object({
     })
     .nullable(),
   offer: BillingOffer.nullable(),
+  /** Free access in the closed beta, until a date; the workspace counts as subscribed meanwhile. */
+  beta: z.object({ until: z.string() }).nullable(),
   /** Owners and admins start and manage the subscription. */
   canManage: z.boolean(),
 });

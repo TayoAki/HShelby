@@ -11,6 +11,7 @@ const links = [
   { href: "/inbox", label: "Inbox" },
   { href: "/apps", label: "Apps" },
   { href: "/assets", label: "Assets" },
+  { href: "/team", label: "Team" },
   { href: "/billing", label: "Billing" },
 ] as const;
 

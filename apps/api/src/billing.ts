@@ -1,7 +1,7 @@
 import { founderSpotsClaimed, isEntitled, organizationSubscription, PLANS } from "@hshelby/billing";
 import type { BillingOffer, BillingState, Price } from "@hshelby/contracts";
-import { apps, conversations, type Db } from "@hshelby/db";
-import { and, count, eq, isNull } from "drizzle-orm";
+import { apps, betaAccess, conversations, type Db } from "@hshelby/db";
+import { and, count, eq, gt, isNull } from "drizzle-orm";
 import type { Logger } from "pino";
 import type Stripe from "stripe";
 import type { Env } from "./env";
@@ -11,7 +11,8 @@ import { isAdminRole } from "./middleware";
 /*
  * One flat subscription per organization. Without an active one, end users can still write in and nothing
  * is lost, but the team can't reply (except in each app's setup conversation), add a second app or invite
- * teammates. With billing switched off (no Stripe variables), nothing is gated.
+ * teammates. With billing switched off (no Stripe variables), nothing is gated. A workspace in the closed beta
+ * (`beta_access`) counts as subscribed until its date.
  */
 
 const PRICE_CACHE_MS = 10 * 60 * 1000;
@@ -41,8 +42,19 @@ export function createBilling({ db, env, stripe, logger }: { db: Db; env: Env; s
     }
   }
 
+  /** When the workspace's beta access ends, if it still has some. */
+  async function betaUntil(organizationId: string): Promise<Date | null> {
+    const [row] = await db
+      .select({ until: betaAccess.until })
+      .from(betaAccess)
+      .where(and(eq(betaAccess.organizationId, organizationId), gt(betaAccess.until, new Date())))
+      .limit(1);
+    return row?.until ?? null;
+  }
+
   async function isActive(organizationId: string) {
     if (!stripe) return true;
+    if (await betaUntil(organizationId)) return true;
     return isEntitled((await organizationSubscription(db, organizationId))?.status);
   }
 
@@ -81,13 +93,14 @@ export function createBilling({ db, env, stripe, logger }: { db: Db; env: Env; s
 
     async state(organizationId: string, role: string): Promise<BillingState> {
       const canManage = isAdminRole(role);
-      if (!stripe) return { enabled: false, active: true, subscription: null, offer: null, canManage };
-      const sub = await organizationSubscription(db, organizationId);
+      if (!stripe) return { enabled: false, active: true, subscription: null, offer: null, beta: null, canManage };
+      const [sub, beta] = await Promise.all([organizationSubscription(db, organizationId), betaUntil(organizationId)]);
       // a row without a Stripe subscription is a checkout that was started and never finished
       const shown = sub?.stripeSubscriptionId ? sub : null;
       return {
         enabled: true,
-        active: isEntitled(sub?.status),
+        active: Boolean(beta) || isEntitled(sub?.status),
+        beta: beta && { until: beta.toISOString() },
         subscription: shown && {
           plan: shown.plan,
           status: shown.status,

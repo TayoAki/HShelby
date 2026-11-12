@@ -4,6 +4,8 @@ import { base62, uuidv7 } from "@hshelby/core";
 import {
   accounts,
   auditEvents,
+  betaAccess,
+  betaInvites,
   invitations,
   members,
   organizations,
@@ -17,10 +19,11 @@ import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { APIError, createAuthMiddleware, getSessionFromCtx } from "better-auth/api";
 import { organization } from "better-auth/plugins/organization";
-import { and, asc, eq, inArray, isNull } from "drizzle-orm";
+import { and, asc, eq, gt, inArray, isNull, sql } from "drizzle-orm";
 import type { Logger } from "pino";
 import type Stripe from "stripe";
 import type { Billing } from "./billing";
+import { invitationEmail, resetPasswordEmail, type Mailer } from "./email";
 import type { Env } from "./env";
 
 const slugify = (value: string) =>
@@ -40,21 +43,20 @@ export async function isOrgAdmin(db: Db, userId: string, organizationId: string)
   return Boolean(row);
 }
 
-type AuthDeps = { db: Db; env: Env; logger: Logger; stripe: Stripe | null; billing: Billing };
+type AuthDeps = { db: Db; env: Env; logger: Logger; stripe: Stripe | null; billing: Billing; mailer: Mailer };
 
-export function createAuth({ db, env, logger, stripe: stripeClient, billing }: AuthDeps) {
+export function createAuth({ db, env, logger, stripe: stripeClient, billing, mailer }: AuthDeps) {
+  const dashboardUrl = env.BETTER_AUTH_URL.replace(/\/$/, "");
   const trustedOrigins = [env.BETTER_AUTH_URL, ...(env.TRUSTED_ORIGINS?.split(",").map((s) => s.trim()) ?? [])];
   const audit = (organizationId: string, userId: string | null, action: string, target: string, metadata: Record<string, unknown>) =>
     db.insert(auditEvents).values({ id: uuidv7(), organizationId, userId, action, target, metadata });
 
   const plugins = [
     organization({
-      // B0 has no email provider yet: log the invitation instead of sending it.
+      // the link opens the dashboard's accept page; joining needs signing in as the invited address
       async sendInvitationEmail(data) {
-        logger.info(
-          { invitationId: data.id, organizationId: data.organization.id, email: data.email },
-          "invitation created (email delivery not configured)",
-        );
+        const url = `${dashboardUrl}/accept-invitation/${encodeURIComponent(data.id)}`;
+        await mailer.send(invitationEmail(data.email, data.inviter.user.name, data.organization.name, url));
       },
       organizationHooks: {
         // inviting teammates is a paid feature
@@ -72,6 +74,9 @@ export function createAuth({ db, env, logger, stripe: stripeClient, billing }: A
         },
         async afterRemoveMember({ member, user, organization }) {
           await audit(organization.id, null, "member.removed", member.userId, { name: user.name, email: user.email });
+        },
+        async afterCancelInvitation({ invitation, cancelledBy, organization }) {
+          await audit(organization.id, cancelledBy.id, "invitation.canceled", invitation.id, { email: invitation.email, role: invitation.role });
         },
         async afterUpdateMemberRole({ member, previousRole, user, organization }) {
           await audit(organization.id, null, "member.role_changed", member.userId, { name: user.name, email: user.email, from: previousRole, to: member.role });
@@ -143,10 +148,45 @@ export function createAuth({ db, env, logger, stripe: stripeClient, billing }: A
       },
     }),
     // Google sign-in comes later; email + password for now (no verification email yet).
-    emailAndPassword: { enabled: true, minPasswordLength: 10, autoSignIn: true },
+    emailAndPassword: {
+      enabled: true,
+      minPasswordLength: 10,
+      autoSignIn: true,
+      // the link goes through /api/auth/reset-password/:token, which checks it and opens the dashboard's page
+      async sendResetPassword({ user, url }) {
+        await mailer.send(resetPasswordEmail(user.email, user.name, url));
+      },
+      resetPasswordTokenExpiresIn: 60 * 60,
+      // a reset signs out every other session, in case the old password leaked
+      revokeSessionsOnPasswordReset: true,
+    },
     databaseHooks: {
       user: {
         create: {
+          // invite-only sign-ups: a beta invite, or a pending invitation to someone's workspace
+          async before(user) {
+            if (env.SIGNUPS !== "invite") return;
+            const email = user.email.toLowerCase();
+            const now = new Date();
+            const [invite] = await db
+              .select({ email: betaInvites.email })
+              .from(betaInvites)
+              .where(and(eq(betaInvites.email, email), gt(betaInvites.until, now)))
+              .limit(1);
+            const [invitation] = invite
+              ? [invite]
+              : await db
+                  .select({ email: invitations.email })
+                  .from(invitations)
+                  .where(and(eq(sql`lower(${invitations.email})`, email), eq(invitations.status, "pending"), gt(invitations.expiresAt, now)))
+                  .limit(1);
+            if (!invitation) {
+              throw new APIError("FORBIDDEN", {
+                code: "signups_closed",
+                message: `${brand.name} is in a closed beta. Ask for an invite at hello@${brand.domain}.`,
+              });
+            }
+          },
           // Every account starts with its own workspace, so onboarding can go straight to "Add app".
           async after(user) {
             const organizationId = uuidv7();
@@ -158,6 +198,13 @@ export function createAuth({ db, env, logger, stripe: stripeClient, billing }: A
                 slug: `${slugify(user.name)}-${base62(6).toLowerCase()}`,
               });
               await tx.insert(members).values({ id: uuidv7(), organizationId, userId: user.id, role: "owner" });
+              // a beta invite gives the new workspace beta access (it counts as subscribed until the invite's date)
+              const [invite] = await tx
+                .update(betaInvites)
+                .set({ usedAt: new Date() })
+                .where(and(eq(betaInvites.email, user.email.toLowerCase()), gt(betaInvites.until, new Date())))
+                .returning();
+              if (invite) await tx.insert(betaAccess).values({ organizationId, until: invite.until, note: invite.note });
               // Sign-up creates its session before this hook runs, so point that session at the new workspace too.
               await tx
                 .update(sessions)

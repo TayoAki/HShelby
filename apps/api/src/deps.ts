@@ -7,6 +7,7 @@ import pino from "pino";
 import Stripe from "stripe";
 import { createAuth } from "./auth";
 import { createBilling } from "./billing";
+import { createMailer } from "./email";
 import type { Deps } from "./context";
 import { deriveDeviceTokenKey } from "./device-tokens";
 import { aiProviderFromEnv } from "./ai/provider";
@@ -21,7 +22,7 @@ function storageFromEnv(env: Env) {
 
 export function createDeps(
   env: Env,
-  overrides: Partial<Pick<Deps, "appStore" | "logger" | "apns" | "storage" | "appStoreRoots" | "ai">> & { stripe?: Stripe } = {},
+  overrides: Partial<Pick<Deps, "appStore" | "logger" | "apns" | "storage" | "appStoreRoots" | "ai" | "mailer">> & { stripe?: Stripe } = {},
 ) {
   const logger =
     overrides.logger ??
@@ -29,13 +30,15 @@ export function createDeps(
   const { db, pool } = createDb(env.DATABASE_URL);
   const stripe = billingEnabled(env) ? (overrides.stripe ?? new Stripe(env.STRIPE_SECRET_KEY!)) : null;
   const billing = createBilling({ db, env, stripe, logger });
+  const mailer = overrides.mailer ?? createMailer(env, logger);
   const deps: Deps = {
     db,
     env,
     logger,
     keyring: parseKeyring(env.ENC_KEYS),
     appStore: overrides.appStore ?? createAppStoreClient({ country: env.APP_STORE_COUNTRY }),
-    auth: createAuth({ db, env, logger, stripe, billing }),
+    auth: createAuth({ db, env, logger, stripe, billing, mailer }),
+    mailer,
     billing,
     deviceTokenKey: deriveDeviceTokenKey(env.BETTER_AUTH_SECRET),
     jobs: createJobs(env.DATABASE_URL, logger, { aiDebounceMs: env.AI_DEBOUNCE_MS }),

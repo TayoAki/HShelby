@@ -1,6 +1,6 @@
-# hshelby
+# Hire Shelby
 
-In-app support chat for iOS apps, modelled on a study of [reception.sh](https://reception.sh). This repo holds the backend, the team dashboard, and the research behind them.
+In-app support chat for iOS apps ([hireshelby.com](https://hireshelby.com)). Internally the code keeps its working name `hshelby` (the repo, the `@hshelby/*` packages, database names). Modelled on a study of [reception.sh](https://reception.sh). This repo holds the backend, the team dashboard, and the research behind them.
 
 | Path | What |
 |---|---|

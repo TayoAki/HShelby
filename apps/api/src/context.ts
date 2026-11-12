@@ -7,6 +7,7 @@ import type { Logger } from "pino";
 import type { AiProvider } from "./ai/provider";
 import type { Auth } from "./auth";
 import type { Billing } from "./billing";
+import type { Mailer } from "./email";
 import type { Env } from "./env";
 import type { Jobs } from "./jobs";
 import type { RateLimiter } from "./rate-limit";
@@ -33,6 +34,8 @@ export type Deps = {
   /** Claude for AI replies, directly or through OpenRouter; null without either key. */
   ai: AiProvider | null;
   rateLimiter: RateLimiter;
+  /** Account email: password resets and invitations. */
+  mailer: Mailer;
 };
 
 type SessionResult = NonNullable<Awaited<ReturnType<Auth["api"]["getSession"]>>>;

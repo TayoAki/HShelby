@@ -63,6 +63,15 @@ export default function BillingPage() {
               </SettingsCard>
             )}
 
+            {billing.enabled && billing.beta && !sub && (
+              <SettingsCard title="Beta access">
+                <p className="text-[15px]">
+                  You&apos;re in the closed beta: everything is on, free, until {day(billing.beta.until)}. Thanks for testing.
+                </p>
+                <p className="mt-2 text-[14px] text-secondary">Nothing will be charged. We&apos;ll be in touch before the beta ends.</p>
+              </SettingsCard>
+            )}
+
             {billing.enabled && billing.active && sub && (
               <SettingsCard title={planName(sub.plan)}>
                 <Suspense fallback={null}>

@@ -11,6 +11,7 @@ Last updated: 2026-10-29
 | **Railway Corporation** | Hosting: API, worker, dashboard, Postgres database, photo storage, backups | Everything the service stores: team accounts (names, emails, password hashes, sessions), app users' messages and photos, the device, identity and custom fields the app sends, push tokens, the audit log | United States (staging runs in Railway's US West region; choose production's before launch) | Always |
 | **OpenRouter, Inc.** | Passes AI-reply requests to the model | Per AI turn: the app's docs and the team's instructions; the person's latest 30 messages (photos only as a placeholder) and team members' first names on their replies; the person's name and email if the app sends them, locale, local time, app and iOS version, device model, subscription status, the offers their device reported | United States | Only for apps with AI replies on. Requests are pinned to Anthropic, with no fallback to other providers and data collection denied (`OPENROUTER_PROVIDERS`, `apps/api/src/ai/provider.ts`) |
 | **Anthropic, PBC** | Runs Claude, which writes the AI replies | Same as OpenRouter | United States | Only for apps with AI replies on: through OpenRouter today, directly once `ANTHROPIC_API_KEY` is set |
+| **Resend (Plus Five Five, Inc.)** | Account email: password resets and team invitations | The recipient's email address and name, the inviter's name and the workspace name, and the link | United States | Once `RESEND_API_KEY` is set on the api |
 | **Stripe, Inc.** | Workspace subscriptions | The workspace's billing contact: name, email, billing address, card (held by Stripe), subscription status. No app users' data | United States | Workspaces that subscribe |
 
 ## Services a team connects
@@ -25,7 +26,6 @@ Not chosen by us, but data leaves through them once a team sets them up:
 
 ## Not in use yet
 
-- **Email delivery:** none. Invitations aren't emailed and there's no password reset email yet; add the provider here when one is chosen.
 - **Error tracking, analytics, uptime monitoring:** none.
 
 ## When this list changes

@@ -145,3 +145,28 @@ export const subscriptions = pgTable(
   },
   (t) => [index("subscriptions_reference_id_idx").on(t.referenceId)],
 );
+
+/**
+ * Free access in the closed beta: the workspace counts as subscribed until `until`. Granted by an operator
+ * (`apps/api/scripts/beta-access.ts`), never by the workspace itself.
+ */
+export const betaAccess = pgTable("beta_access", {
+  organizationId: text("organization_id")
+    .primaryKey()
+    .references(() => organizations.id, { onDelete: "cascade" }),
+  until: ts("until").notNull(),
+  note: text("note"),
+  grantedAt: ts("granted_at").notNull().defaultNow(),
+});
+
+/**
+ * A closed-beta invitation by email (`apps/api/scripts/beta-access.ts`): the address may sign up while sign-ups
+ * are invite-only (`SIGNUPS=invite`), and the workspace it creates gets beta access until `until`.
+ */
+export const betaInvites = pgTable("beta_invites", {
+  email: text("email").primaryKey(),
+  until: ts("until").notNull(),
+  note: text("note"),
+  createdAt: ts("created_at").notNull().defaultNow(),
+  usedAt: ts("used_at"),
+});

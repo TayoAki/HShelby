@@ -1,10 +1,16 @@
 import { z } from "zod";
 
 /** Working product name. Change it here; every surface reads it from this constant. */
-export const brand = { name: "hshelby" } as const;
+export const brand = {
+  /** The product's name, as people see it. */
+  name: "Hire Shelby",
+  /** For identifiers: the push payload key, environment variable names, the SDK module. */
+  slug: "hireshelby",
+  domain: "hireshelby.com",
+} as const;
 
 /** Where developers keep an app's identity secret on their server. */
-export const IDENTITY_SECRET_ENV = `${brand.name.toUpperCase()}_IDENTITY_SECRET`;
+export const IDENTITY_SECRET_ENV = `${brand.slug.toUpperCase()}_IDENTITY_SECRET`;
 
 /* ---------- errors ---------- */
 

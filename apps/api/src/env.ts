@@ -57,6 +57,16 @@ const EnvSchema = z.object({
   AI_MODEL: optional,
   /** How long after a person's last message the AI answers, so a burst of messages gets one answer. */
   AI_DEBOUNCE_MS: z.coerce.number().int().min(0).default(8000),
+  /** Account email (password resets, invitations) through Resend; without a key nothing is sent (src/email.ts). */
+  RESEND_API_KEY: optional,
+  RESEND_API_URL: z.string().url().default("https://api.resend.com"),
+  /** The sender; its domain must be verified in Resend. */
+  EMAIL_FROM: z.string().default("Hire Shelby <hello@hireshelby.com>"),
+  /**
+   * "invite" keeps sign-ups to addresses with a beta invite (scripts/beta-access.ts) or a pending invitation to a
+   * workspace, as in the closed beta; "open" lets anyone sign up.
+   */
+  SIGNUPS: z.enum(["open", "invite"]).default("open"),
   /** Multiplies every rate limit (src/rate-limit.ts); 0 turns them off. */
   RATE_LIMIT_SCALE: z.coerce.number().min(0).default(1),
 });

@@ -43,6 +43,9 @@ function describe(e: AuditEvent) {
     "member.added": `${str(m.name) || str(m.email)} joined as ${str(m.role)}`,
     "member.removed": `${str(m.name) || str(m.email)} was removed`,
     "member.role_changed": `${str(m.name) || str(m.email)} changed from ${str(m.from)} to ${str(m.to)}`,
+    "invitation.canceled": `Cancelled the invitation for ${str(m.email)}`,
+    "billing.beta_granted": `Beta access granted until ${str(m.until).slice(0, 10)}`,
+    "billing.beta_revoked": "Beta access ended",
   };
   return lines[e.action] ?? `${e.action}${e.target ? ` · ${target}` : ""}`;
 }

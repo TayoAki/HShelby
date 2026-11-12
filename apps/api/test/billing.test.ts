@@ -2,8 +2,8 @@
 import { randomUUID } from "node:crypto";
 import { founderSpotsClaimed } from "@hshelby/billing";
 import { startFakeStripe } from "@hshelby/billing/testing";
-import { subscriptions } from "@hshelby/db";
-import { inArray } from "drizzle-orm";
+import { betaAccess, subscriptions } from "@hshelby/db";
+import { eq, inArray } from "drizzle-orm";
 import { afterAll, describe, expect, it } from "vitest";
 import { joinAsMember, makeTestApp, ORIGIN, registerDevice, reply, signUp, workspaceWithApp, type TeamCall } from "./helpers";
 
@@ -100,6 +100,7 @@ describe("without a subscription", () => {
         yearly: { amount: 20000, currency: "usd" },
         founder: { claimed: 0, total: 3, nextMonthly: { amount: 5000, currency: "usd" } },
       },
+      beta: null,
       canManage: true,
     });
     const pricing = await app.request("/public/pricing");
@@ -125,6 +126,25 @@ describe("without a subscription", () => {
     expect(second.status).toBe(402);
     const invited = await invite(team.call, await orgId(team.call));
     expect(invited.status).toBe(402);
+  });
+});
+
+describe("closed beta", () => {
+  it("counts a workspace with beta access as subscribed until its date, without taking a founder spot", async () => {
+    const team = await workspaceWithApp(app);
+    const id = await orgId(team.call);
+    const spots = await founderSpotsClaimed(deps.db);
+    await deps.db.insert(betaAccess).values({ organizationId: id, until: new Date(Date.now() + 86_400_000), note: "test" });
+    expect(await billing(team.call)).toMatchObject({ active: true, subscription: null, beta: { until: expect.any(String) } });
+    // what a subscription unlocks: more apps and teammates
+    expect((await team.call("/api/apps", { method: "POST", body: JSON.stringify({ name: "Second app" }) })).status).toBe(201);
+    expect((await invite(team.call, id)).status).toBe(200);
+    expect(await founderSpotsClaimed(deps.db)).toBe(spots);
+
+    // after its date it's an unsubscribed workspace again
+    await deps.db.update(betaAccess).set({ until: new Date(Date.now() - 1000) }).where(eq(betaAccess.organizationId, id));
+    expect(await billing(team.call)).toMatchObject({ active: false, beta: null });
+    expect((await invite(team.call, id)).status).toBe(402);
   });
 });
 
@@ -236,7 +256,7 @@ describe("with billing switched off", () => {
     const plain = await makeTestApp();
     try {
       const team = await workspaceWithApp(plain.app);
-      expect(await (await team.call("/api/billing")).json()).toEqual({ enabled: false, active: true, subscription: null, offer: null, canManage: true });
+      expect(await (await team.call("/api/billing")).json()).toEqual({ enabled: false, active: true, subscription: null, offer: null, beta: null, canManage: true });
       expect((await team.call("/api/apps", { method: "POST", body: JSON.stringify({ name: "Second app" }) })).status).toBe(201);
       expect(await (await plain.app.request("/public/pricing")).json()).toEqual({ enabled: false, offer: null });
     } finally {

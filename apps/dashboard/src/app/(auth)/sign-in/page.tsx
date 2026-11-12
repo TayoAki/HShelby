@@ -4,14 +4,10 @@ import Link from "next/link";
 import { useState, type FormEvent } from "react";
 import { AuthCard, ErrorNote, Field, PrimaryButton } from "@/components/ui";
 import { authClient } from "@/lib/auth-client";
-
-/** Only same-site paths are allowed as a post-sign-in destination. */
-function nextPath() {
-  const next = new URLSearchParams(window.location.search).get("next");
-  return next && next.startsWith("/") && !next.startsWith("//") ? next : "/apps";
-}
+import { safeNext, useSearch } from "@/lib/use-search";
 
 export default function SignInPage() {
+  const search = useSearch();
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -27,7 +23,7 @@ export default function SignInPage() {
     setBusy(false);
     if (error) return setError(error.message ?? "Couldn't sign you in");
     // Full page load: the next page starts from the new session, not cached client state.
-    window.location.assign(nextPath());
+    window.location.assign(safeNext(window.location.search, "/apps"));
   }
 
   return (
@@ -37,7 +33,10 @@ export default function SignInPage() {
       footer={
         <>
           New here?{" "}
-          <Link href="/sign-up" className="text-fg underline-offset-4 hover:underline">
+          <Link
+            href={`/sign-up${search}`}
+            className="text-fg underline-offset-4 hover:underline"
+          >
             Create an account
           </Link>
         </>
@@ -46,6 +45,11 @@ export default function SignInPage() {
       <form onSubmit={onSubmit} className="space-y-4">
         <Field label="Email" name="email" type="email" autoComplete="email" required />
         <Field label="Password" name="password" type="password" autoComplete="current-password" required />
+        <p className="-mt-1 text-right text-[13px]">
+          <Link href="/forgot-password" className="text-secondary underline-offset-4 hover:text-fg hover:underline">
+            Forgot your password?
+          </Link>
+        </p>
         {error && <ErrorNote>{error}</ErrorNote>}
         <PrimaryButton type="submit" disabled={busy}>
           {busy ? "Signing in…" : "Sign in"}

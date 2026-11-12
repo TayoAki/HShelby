@@ -53,7 +53,7 @@ export function buildPushPayload(
       ...(context.conversationId && { "thread-id": context.conversationId }),
     },
     // the SDK opens this conversation when the notification is tapped
-    [brand.name]: {
+    [brand.slug]: {
       ...(context.conversationId && { conversationId: context.conversationId }),
       ...(context.messageId && { messageId: context.messageId }),
     },

@@ -1,6 +1,6 @@
 # Agent notes
 
-npm-workspaces monorepo. Node 22.
+Hire Shelby (hireshelby.com): in-app support chat for iOS apps. npm-workspaces monorepo, Node 22. `hshelby` is the internal working name (repo, `@hshelby/*` packages, database names); people see "Hire Shelby" (`brand` in `packages/contracts`).
 
 | Path | What |
 |---|---|

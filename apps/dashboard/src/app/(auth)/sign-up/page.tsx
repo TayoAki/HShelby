@@ -4,8 +4,11 @@ import Link from "next/link";
 import { useState, type FormEvent } from "react";
 import { AuthCard, ErrorNote, Field, PrimaryButton } from "@/components/ui";
 import { authClient } from "@/lib/auth-client";
+import { safeNext, useSearch } from "@/lib/use-search";
 
 export default function SignUpPage() {
+  // a `next` (an invitation being accepted) survives switching to sign-in and wins over onboarding
+  const search = useSearch();
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -21,9 +24,8 @@ export default function SignUpPage() {
     });
     setBusy(false);
     if (error) return setError(error.message ?? "Couldn't create your account");
-    // Full page load so the onboarding page starts from the new session, not cached client state.
-    // eslint-disable-next-line @next/next/no-location-assign-relative-destination
-    window.location.assign("/onboarding/add");
+    // Full page load so the next page starts from the new session, not cached client state.
+    window.location.assign(safeNext(window.location.search, "/onboarding/add"));
   }
 
   return (
@@ -33,7 +35,7 @@ export default function SignUpPage() {
       footer={
         <>
           Already have an account?{" "}
-          <Link href="/sign-in" className="text-fg underline-offset-4 hover:underline">
+          <Link href={`/sign-in${search}`} className="text-fg underline-offset-4 hover:underline">
             Sign in
           </Link>
         </>
@@ -47,6 +49,17 @@ export default function SignUpPage() {
         <PrimaryButton type="submit" disabled={busy}>
           {busy ? "Creating account…" : "Create account"}
         </PrimaryButton>
+        <p className="text-center text-[13px] text-secondary">
+          By creating an account you agree to the{" "}
+          <Link href="/legal/terms" className="underline underline-offset-4 hover:text-fg">
+            Terms of Service
+          </Link>{" "}
+          and{" "}
+          <Link href="/legal/privacy" className="underline underline-offset-4 hover:text-fg">
+            Privacy Policy
+          </Link>
+          .
+        </p>
       </form>
     </AuthCard>
   );

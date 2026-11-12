@@ -18,7 +18,7 @@ describe("push.send", () => {
     expect(request.headers["apns-topic"]).toBe("com.example.lockdlist");
     expect(request.payload).toEqual({
       aps: { alert: { title: "LockdList", body: "Ada: Try pulling to refresh" }, sound: "default", badge: 3, "thread-id": s.conversationId },
-      hshelby: { conversationId: s.conversationId, messageId: s.replyId },
+      hireshelby: { conversationId: s.conversationId, messageId: s.replyId },
     });
     expect((await s.device()).pushIssue).toBeNull();
   });
