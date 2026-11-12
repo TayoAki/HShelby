@@ -84,3 +84,33 @@ DATABASE_URL=… npx tsx apps/api/scripts/beta-access.ts --list
 ## Account email
 
 Password resets and team invitations go out through Resend when `RESEND_API_KEY` is set on the api (`EMAIL_FROM` names the sender; its domain, hireshelby.com, must be verified in Resend with the DNS records it shows). Without a key nothing is sent: a production api logs a warning per email, and an owner can still copy an invitation's link from the Team page and send it themselves. Reset links work once, for an hour, and a reset signs the account out everywhere else.
+
+## Releasing the SDKs
+
+Both SDKs are MIT-licensed and published from this repository.
+
+**iOS** (`sdk/ios` → `github.com/tayoaki/hireshelby-ios`, public). Swift Package Manager installs from git tags, so a
+release is a commit of the folder's contents plus a tag. Bump `HireShelbyVersion.current` and the CHANGELOG first.
+
+```sh
+VERSION=0.1.0
+C=$(git commit-tree HEAD:sdk/ios -m "Hire Shelby iOS SDK $VERSION")                    # first release
+# later releases build on the published history:
+# git fetch https://github.com/tayoaki/hireshelby-ios main && C=$(git commit-tree HEAD:sdk/ios -p FETCH_HEAD -m "Hire Shelby iOS SDK $VERSION")
+git push https://github.com/tayoaki/hireshelby-ios "$C:refs/heads/main"
+git tag -a "$VERSION" -m "Hire Shelby iOS SDK $VERSION" "$C" && git push https://github.com/tayoaki/hireshelby-ios "$VERSION"
+```
+
+The repository's own CI (`sdk/ios/.github/workflows/ci.yml`) builds and tests it. After the first release, set
+`SWIFT_PACKAGE_URL=https://github.com/tayoaki/hireshelby-ios` on the api so the dashboard's setup prompt names it.
+
+**React Native** (`sdk/react-native` → npm `@hireshelby/react-native`). Needs the `hireshelby` npm organization and
+an npm login with two-factor authentication. `prepack` copies the iOS SDK's sources in and builds the JavaScript:
+
+```sh
+cd sdk/react-native && npm ci && npm test && npm publish --access public
+```
+
+Release the iOS SDK and the npm package with the same version. Then set `RN_PACKAGE=@hireshelby/react-native` on the
+api. The package's `repository` field points to `github.com/tayoaki/hireshelby-react-native`; create that public
+repository (or change the field) before the first publish, so npm's links work.
