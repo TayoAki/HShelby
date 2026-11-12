@@ -29,6 +29,14 @@ Why one Postgres for everything at the start: messages, the job queue, realtime 
 
 **B0–B12 run on Railway staging** (billing on the UGC Mediakits Stripe sandbox in test mode; AI replies on Claude Opus 5.5 through OpenRouter until an `ANTHROPIC_API_KEY` is set) (project `hshelby`, environment `staging`): dashboard at `https://dashboard-staging-0dee.up.railway.app`, API at `https://api-staging-f8f8.up.railway.app`.
 
+**Production** is its own Railway project, `hireshelby` (environment `production`), for the closed beta: `api`, `worker`, `dashboard`, `Postgres` and a `photos` bucket, built from the same branch with the same commands, watch patterns and health checks as staging. The dashboard answers at `https://app.hireshelby.com` and the API at `https://api.hireshelby.com` once their DNS records are in place (CNAME plus a `_railway-verify` TXT each, at the domain's DNS host, Squarespace); until then at `dashboard-production-14ce47ef.up.railway.app` and `api-production-b30cefb9.up.railway.app` (the dashboard's Railway domain is in `TRUSTED_ORIGINS` for that). It runs with `SIGNUPS=invite` and without Stripe (the beta is free; billing comes back with live keys at launch), its own `BETTER_AUTH_SECRET` and `ENC_KEYS` (set by hand in Railway, never shared with staging), and no AI or email keys until fresh ones are set. Volume backups and point-in-time recovery still have to be switched on in Railway's dashboard before testers' data goes in (`docs/RUNBOOK.md`). The product is named Hire Shelby (`brand` in `packages/contracts`); `hshelby` stays as the internal name.
+
+**After B12:**
+
+- **Closed beta:** `SIGNUPS=invite`, `beta_invites` and `beta_access` (migration 0012), `apps/api/scripts/beta-access.ts`; the billing page shows beta access (`docs/RUNBOOK.md`).
+- **Account email** (`apps/api/src/email.ts`): password reset and team invitations through Resend (`RESEND_API_KEY`, `EMAIL_FROM`); the dashboard has forgot/reset password, a Team page and an accept-invitation page. Better Auth's workspace deletion is off (it would leave photos, the Stripe subscription and Telegram webhooks).
+- **Legal** (`docs/legal`, drafts for counsel): published at `/legal/*` on the dashboard; sign-up links the terms and privacy policy.
+
 B1 (messaging core) as built:
 
 - **SDK API** (`apps/api/src/routes/sdk.ts`): `POST /v1/devices`, `POST /v1/session/refresh`, `PATCH /v1/device`, `GET /v1/conversation?after|before|limit`, `POST /v1/messages`, `POST /v1/read`, `GET /v1/unread`. Device secrets are `dvs_` + 43 chars, stored as SHA-256. Access tokens are 15-minute HS256 JWTs with a key derived (HKDF) from `BETTER_AUTH_SECRET`, so no extra secret to manage; every request re-checks the device, its app and its session version.
@@ -219,6 +227,8 @@ Variables (secrets are set in Railway only, never in the repo):
 | worker | `DATABASE_URL` | `${{Postgres.DATABASE_URL}}` |
 | worker | `ENC_KEYS` | `${{api.ENC_KEYS}}` (decrypts apps' APNs keys) |
 | worker | `STRIPE_SECRET_KEY` | `${{api.STRIPE_SECRET_KEY}}` (billing sync; optional) |
+| api | `SIGNUPS` | `invite` in production during the closed beta (only invited addresses sign up); default `open` |
+| api | `RESEND_API_KEY`, `EMAIL_FROM` | Account email (password reset, invitations); without a key nothing is sent. `EMAIL_FROM` defaults to `Hire Shelby <hello@hireshelby.com>`; its domain must be verified in Resend |
 | api | `ANTHROPIC_API_KEY` or `OPENROUTER_API_KEY` | Claude for AI replies, directly or through OpenRouter (apps can't turn them on without one; Anthropic wins when both are set); `AI_MODEL` optional (overrides the model), `OPENROUTER_PROVIDERS` optional (default `anthropic`; widening it adds subprocessors), `AI_DEBOUNCE_MS` optional (default 8000) |
 | api, worker | `TELEGRAM_CHAT_INTERVAL_MS` | Optional: minimum gap between posts in one Telegram chat (default 3000) |
 | api, worker | `S3_ENDPOINT`, `S3_REGION`, `S3_BUCKET`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY` | `${{photos.ENDPOINT}}`, `${{photos.REGION}}`, `${{photos.BUCKET}}`, `${{photos.ACCESS_KEY_ID}}`, `${{photos.SECRET_ACCESS_KEY}}` (photos are off without them) |
