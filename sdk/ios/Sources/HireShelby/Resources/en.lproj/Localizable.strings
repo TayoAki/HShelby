@@ -1,0 +1,63 @@
+/* Hire Shelby chat: English strings. Copy this folder as <language>.lproj to translate. Team messages and card
+   button labels set in the dashboard are shown as written. */
+
+/* Navigation title of the chat */
+"chat.title" = "Support";
+/* Shown when the app hasn't configured the SDK */
+"chat.notConfigured" = "Support isn't available right now.";
+
+/* Above an empty conversation */
+"welcome.title" = "How can we help?";
+"welcome.text" = "Send us a message and we'll answer here.";
+
+"action.close" = "Close";
+"action.retry" = "Retry";
+"action.delete" = "Delete";
+"action.copy" = "Copy";
+"history.loadEarlier" = "Load earlier messages";
+
+/* Composer */
+"composer.placeholder" = "Message";
+"composer.send" = "Send";
+"composer.addPhoto" = "Add photo";
+"composer.removePhoto" = "Remove photo";
+/* %d: how many characters to remove */
+"composer.tooLong" = "%d characters too long";
+"composer.photoFailed" = "That photo couldn't be added.";
+
+/* Delivery of the user's messages */
+"status.sending" = "Sending…";
+"status.sent" = "Sent";
+"status.seen" = "Seen";
+"status.notDelivered" = "Not delivered";
+"status.tapToRetry" = "Not delivered. Tap to retry.";
+
+/* %@: a teammate's first name */
+"typing.named" = "%@ is typing…";
+"typing.someone" = "Typing…";
+
+/* Label on replies the AI wrote */
+"label.ai" = "AI";
+"label.aiAccessibility" = "Written by AI";
+
+/* Default card buttons */
+"card.review" = "Rate on the App Store";
+"card.offer" = "View offer";
+"card.unavailable" = "No longer available";
+
+/* Instead of the composer */
+"sending.verificationRequired" = "Sign in to send messages.";
+"sending.deviceBlocked" = "You can't send messages from this device.";
+"connection.offline" = "No connection. Messages will be sent when you're back online.";
+
+/* VoiceOver */
+"a11y.you" = "You";
+"a11y.team" = "Support";
+"a11y.photo" = "Photo";
+/* %d: number of photos */
+"a11y.photoCount" = "%d photos";
+"a11y.photoUnavailable" = "Photo couldn't load. Double-tap to try again.";
+
+/* Day headers */
+"date.today" = "Today";
+"date.yesterday" = "Yesterday";

@@ -1,0 +1,1 @@
+{ "events": ["checkout_cancelled", "paywall_declined"], "ttlSeconds": 300 }

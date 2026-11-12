@@ -1,0 +1,6 @@
+{
+  "error": {
+    "code": "validation_failed",
+    "message": "clientId: Invalid UUID; body: send text, a photo, or both"
+  }
+}

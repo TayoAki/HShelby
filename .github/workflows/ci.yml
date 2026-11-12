@@ -1,8 +1,8 @@
 name: CI
 
 on:
+  # every branch: work happens on feature branches before there is a main
   push:
-    branches: [main]
   pull_request:
 
 concurrency:

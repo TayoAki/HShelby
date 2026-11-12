@@ -1,0 +1,11 @@
+{
+  "deviceSecret": "dvs_XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX",
+  "accessToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJyZWRhY3RlZCJ9.redacted-signature",
+  "expiresIn": 900,
+  "identity": {
+    "userId": "user_42",
+    "name": "Alex Doe",
+    "email": "alex@example.com",
+    "verified": false
+  }
+}

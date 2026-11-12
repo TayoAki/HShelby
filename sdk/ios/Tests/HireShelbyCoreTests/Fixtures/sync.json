@@ -1,0 +1,106 @@
+{
+  "identity": { "userId": "user_42", "name": "Alex Doe", "email": "alex@example.com", "verified": true },
+  "sending": { "allowed": true, "reason": null },
+  "conversation": {
+    "id": "0192f0c1-7b2a-789c-8d4e-1f2a3b4c5d10",
+    "status": "open",
+    "lastSeq": 12,
+    "userReadSeq": 8,
+    "unread": 3
+  },
+  "messages": [
+    {
+      "id": "0192f0c1-7b2a-789c-8d4e-1f2a3b4c5d01",
+      "seq": 7,
+      "sender": "user",
+      "kind": "text",
+      "text": "Hi! The export button does nothing 😕",
+      "card": null,
+      "actionClickedAt": null,
+      "author": null,
+      "byAi": false,
+      "clientId": "6F1C2E0A-3B4D-4E5F-8A9B-0C1D2E3F4A5B",
+      "attachments": [],
+      "createdAt": "2026-11-12T09:58:01.123Z"
+    },
+    {
+      "id": "0192f0c1-7b2a-789c-8d4e-1f2a3b4c5d02",
+      "seq": 8,
+      "sender": "user",
+      "kind": "text",
+      "text": "",
+      "card": null,
+      "actionClickedAt": null,
+      "author": null,
+      "byAi": false,
+      "clientId": "0c9f3b7e-1a2b-4c3d-9e8f-7a6b5c4d3e2f",
+      "attachments": [
+        {
+          "id": "0192f0c1-7b2a-789c-8d4e-1f2a3b4c5d90",
+          "url": "https://bucket.example.com/apps/a/devices/d/0192f0c1.jpg?X-Amz-Signature=abc",
+          "contentType": "image/jpeg",
+          "width": 1536,
+          "height": 2048
+        }
+      ],
+      "createdAt": "2026-11-12T09:58:30.000Z"
+    },
+    {
+      "id": "0192f0c1-7b2a-789c-8d4e-1f2a3b4c5d03",
+      "seq": 9,
+      "sender": "agent",
+      "kind": "text",
+      "text": "Thanks Alex, looking into it now.",
+      "card": null,
+      "actionClickedAt": null,
+      "author": { "name": "Sam", "initial": "S", "photoUrl": "https://bucket.example.com/team/sam.jpg?X-Amz-Signature=def" },
+      "byAi": false,
+      "clientId": null,
+      "attachments": [],
+      "createdAt": "2026-11-12T10:01:00.000Z"
+    },
+    {
+      "id": "0192f0c1-7b2a-789c-8d4e-1f2a3b4c5d04",
+      "seq": 10,
+      "sender": "agent",
+      "kind": "text",
+      "text": "Exports need the latest version: update from the App Store and try again.",
+      "card": null,
+      "actionClickedAt": null,
+      "author": { "name": "Shelby", "initial": null, "photoUrl": null },
+      "byAi": true,
+      "clientId": null,
+      "attachments": [],
+      "createdAt": "2026-11-12T10:01:09.000Z"
+    },
+    {
+      "id": "0192f0c1-7b2a-789c-8d4e-1f2a3b4c5d05",
+      "seq": 11,
+      "sender": "agent",
+      "kind": "review",
+      "text": "Glad we could help! If you have a moment, a rating for Acme would mean a lot to us.",
+      "card": { "type": "review", "url": "https://apps.apple.com/app/id1234567890?action=write-review", "buttonLabel": null },
+      "actionClickedAt": null,
+      "author": null,
+      "byAi": false,
+      "clientId": null,
+      "attachments": [],
+      "createdAt": "2026-11-12T10:05:00.000Z"
+    },
+    {
+      "id": "0192f0c1-7b2a-789c-8d4e-1f2a3b4c5d06",
+      "seq": 12,
+      "sender": "agent",
+      "kind": "paywall",
+      "text": "Here's 50% off your first year.",
+      "card": { "type": "paywall", "paywallId": "pro_yearly", "buttonLabel": "See the deal" },
+      "actionClickedAt": "2026-11-12T10:07:42.500Z",
+      "author": null,
+      "byAi": false,
+      "clientId": null,
+      "attachments": [],
+      "createdAt": "2026-11-12T10:06:00.000Z"
+    }
+  ],
+  "hasMore": true
+}

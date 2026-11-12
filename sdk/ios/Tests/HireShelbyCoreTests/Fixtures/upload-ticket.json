@@ -1,0 +1,12 @@
+{
+  "attachmentId": "0192f0c1-7b2a-789c-8d4e-1f2a3b4c5d91",
+  "uploadUrl": "https://bucket.example.com/apps/a/devices/d/0192f0c1-7b2a-789c-8d4e-1f2a3b4c5d91.jpg?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Signature=0f0f",
+  "method": "PUT",
+  "headers": {
+    "Content-Type": "image/jpeg",
+    "Content-Length": "48213",
+    "x-amz-checksum-sha256": "47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU=",
+    "If-None-Match": "*"
+  },
+  "expiresIn": 900
+}

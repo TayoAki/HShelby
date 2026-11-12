@@ -1,0 +1,7 @@
+{
+  "identity": { "userId": null, "name": null, "email": null, "verified": false },
+  "sending": { "allowed": false, "reason": "verification_required" },
+  "conversation": null,
+  "messages": [],
+  "hasMore": false
+}

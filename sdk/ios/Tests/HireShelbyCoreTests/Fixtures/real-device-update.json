@@ -1,0 +1,8 @@
+{
+  "identity": {
+    "userId": "user_42",
+    "name": "Alex Doe",
+    "email": "alex@example.com",
+    "verified": false
+  }
+}

@@ -1,0 +1,54 @@
+name: iOS SDK
+
+on:
+  # any branch, but only when the SDK changes (macOS runners are costly)
+  push:
+    paths:
+      - "sdk/ios/**"
+      - ".github/workflows/ios-sdk.yml"
+  pull_request:
+    paths:
+      - "sdk/ios/**"
+      - ".github/workflows/ios-sdk.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: ios-sdk-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: macos-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: sdk/ios
+    env:
+      # Optional: set these repository variables to run the integration test against a real API.
+      HIRESHELBY_TEST_API_URL: ${{ vars.HIRESHELBY_TEST_API_URL }}
+      HIRESHELBY_TEST_APP_ID: ${{ vars.HIRESHELBY_TEST_APP_ID }}
+    steps:
+      - uses: actions/checkout@v4
+      # The newest stable Xcode on the runner (betas left out)
+      - run: |
+          XCODE=$(ls -d /Applications/Xcode_*.app | grep -vi beta | sort -V | tail -n 1)
+          sudo xcode-select -s "$XCODE/Contents/Developer"
+          xcodebuild -version
+          swift --version
+      # Core: models, networking, session, outbox, live (and photo conversion on macOS)
+      - run: swift build
+      - run: swift test
+      # The chat UI compiles only for iOS
+      - run: xcodebuild -scheme HireShelby -destination 'generic/platform=iOS Simulator' build
+      - run: xcodebuild -scheme HireShelby -destination 'generic/platform=iOS' CODE_SIGNING_ALLOWED=NO build
+      - name: Build for a simulator device
+        run: |
+          UDID=$(xcrun simctl list devices available -j | python3 -c '
+          import json, re, sys
+          devices = json.load(sys.stdin)["devices"]
+          def version(runtime):
+              return [int(n) for n in re.findall(r"\d+", runtime.split("iOS")[-1])]
+          runtimes = sorted((r for r in devices if ".iOS-" in r), key=version, reverse=True)
+          print(next(d["udid"] for r in runtimes for d in devices[r] if d["name"].startswith("iPhone")))
+          ')
+          xcodebuild -scheme HireShelby -destination "id=$UDID" build

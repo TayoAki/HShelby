@@ -1,0 +1,98 @@
+{
+  "identity": {
+    "userId": "user_42",
+    "name": "Alex Doe",
+    "email": "alex@example.com",
+    "verified": false
+  },
+  "sending": {
+    "allowed": true,
+    "reason": null
+  },
+  "conversation": {
+    "id": "01a1cd83-6cd7-74a4-bc1a-9ce687804f3b",
+    "status": "open",
+    "lastSeq": 4,
+    "userReadSeq": 1,
+    "unread": 3
+  },
+  "messages": [
+    {
+      "id": "01a1cd83-6cda-7bab-ad0b-d39fa3381100",
+      "seq": 1,
+      "sender": "user",
+      "kind": "text",
+      "text": "Hi! The export button does nothing",
+      "card": null,
+      "actionClickedAt": null,
+      "author": null,
+      "byAi": false,
+      "clientId": "32f9ab80-b749-4a57-b6be-ad4c615c44be",
+      "attachments": [],
+      "createdAt": "2026-11-12T02:08:24.790Z"
+    },
+    {
+      "id": "01a1cd83-6d1b-7985-ad8c-cf7b4f4426ac",
+      "seq": 2,
+      "sender": "agent",
+      "kind": "text",
+      "text": "Thanks Alex, looking into it now.",
+      "card": null,
+      "actionClickedAt": null,
+      "author": {
+        "name": "SDK",
+        "initial": "S",
+        "photoUrl": null
+      },
+      "byAi": false,
+      "clientId": null,
+      "attachments": [],
+      "createdAt": "2026-11-12T02:08:24.858Z"
+    },
+    {
+      "id": "01a1cd83-6d35-7cd1-8884-40334bd26a52",
+      "seq": 3,
+      "sender": "agent",
+      "kind": "review",
+      "text": "",
+      "card": {
+        "type": "review",
+        "url": "https://apps.apple.com/app/id1234567890?action=write-review",
+        "buttonLabel": null
+      },
+      "actionClickedAt": null,
+      "author": {
+        "name": "SDK",
+        "initial": "S",
+        "photoUrl": null
+      },
+      "byAi": false,
+      "clientId": null,
+      "attachments": [],
+      "createdAt": "2026-11-12T02:08:24.882Z"
+    },
+    {
+      "id": "01a1cd83-6d4f-7e5c-9681-b63663d1beb2",
+      "seq": 4,
+      "sender": "agent",
+      "kind": "paywall",
+      "text": "Here's 50% off your first year.",
+      "card": {
+        "type": "paywall",
+        "paywallId": "pro_yearly",
+        "buttonLabel": "See the deal"
+      },
+      "actionClickedAt": "2026-11-12T02:08:24.930Z",
+      "author": {
+        "name": "SDK",
+        "initial": "S",
+        "photoUrl": null
+      },
+      "byAi": false,
+      "clientId": null,
+      "attachments": [],
+      "createdAt": "2026-11-12T02:08:24.909Z"
+    }
+  ],
+  "hasMore": false
+}

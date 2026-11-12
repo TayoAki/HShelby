@@ -1,0 +1,15 @@
+{
+  "identity": {
+    "userId": null,
+    "name": null,
+    "email": null,
+    "verified": false
+  },
+  "sending": {
+    "allowed": true,
+    "reason": null
+  },
+  "conversation": null,
+  "messages": [],
+  "hasMore": false
+}

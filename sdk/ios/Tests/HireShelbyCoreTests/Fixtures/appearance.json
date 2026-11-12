@@ -1,0 +1,31 @@
+{
+  "version": 3,
+  "appearance": {
+    "colors": {
+      "accent": { "light": "#FF4B2B", "dark": "#FF8A70" },
+      "chatBackground": { "dark": "#101010" },
+      "incomingBackground": { "light": "not-a-color" }
+    },
+    "colorScheme": "app",
+    "title": { "en": "Help", "pt-BR": "Ajuda", "de": "Hilfe" },
+    "welcomeTitle": { "en": "Hi there 👋" },
+    "hidesWelcomeText": true,
+    "welcomeIcon": { "type": "asset", "assetId": "7d1e9a52-3c4b-4f6a-9e1d-2b3c4d5e6f70", "url": "https://api.hireshelby.com/v1/assets/7d1e9a52-3c4b-4f6a-9e1d-2b3c4d5e6f70.png" },
+    "welcomeIconSize": 64,
+    "welcomeIconCornerRadius": 16,
+    "welcomeIconOffset": { "x": 0, "y": -8 },
+    "fontDesign": "rounded",
+    "showsCloseButton": true,
+    "closeIcon": { "type": "symbol", "name": "chevron.down" },
+    "fadesOlderMessages": false,
+    "cards": {
+      "buttonIcon": { "type": "symbol", "name": "star.fill" },
+      "trailingIcon": { "type": "hidden" },
+      "iconSize": 14,
+      "buttonColor": { "light": "#111111" },
+      "buttonTextColor": { "light": "#FFFFFF", "dark": "#000000" }
+    },
+    "someFutureOption": { "nested": [1, 2, 3] }
+  },
+  "team": { "showPhotos": true, "showNames": true }
+}

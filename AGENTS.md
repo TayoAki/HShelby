@@ -17,6 +17,7 @@ Hire Shelby (hireshelby.com): in-app support chat for iOS apps. npm-workspaces m
 | `packages/storage` | S3-compatible photo storage (presigned PUT/GET, prefix deletes) and JPEG/PNG header checks; `@hshelby/storage/convert` converts library images and profile photos with sharp (API only); `@hshelby/storage/testing` makes a bucket on the test S3. |
 | `packages/billing` | Subscription status rules (what counts as paying), founder-spot count, Stripe→row mapping; `@hshelby/billing/testing` has a fake Stripe (API, signed webhooks, Checkout and portal pages). |
 | `packages/ui` | Phone frame and chat mock shared by web and dashboard. |
+| `sdk/ios` | The native Swift package (`HireShelby` UI + `HireShelbyCore` engine), published to its own repository. `swift build && swift test` runs on Linux for the core; the SwiftUI chat compiles only on macOS (`.github/workflows/ios-sdk.yml`). |
 
 - Local Postgres for tests: `TEST_DATABASE_URL` (default `postgres://postgres@localhost:5433/hshelby_test`).
 - Local S3 for photo tests: `TEST_S3_ENDPOINT` (default `http://127.0.0.1:5070`); run `pip install "moto[server]" && moto_server -p 5070`.

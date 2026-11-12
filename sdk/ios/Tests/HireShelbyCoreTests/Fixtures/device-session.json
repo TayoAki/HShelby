@@ -1,0 +1,6 @@
+{
+  "deviceSecret": "dvs_Hn2kq7Zr0pYb4XcW9mLs3TfVa8EoJu1iDgK6RyNxQ5w",
+  "accessToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJhcHAiOiIwMTkyZjBjMS03YjJhLTc4OWMtOGQ0ZS0xZjJhM2I0YzVkNmUiLCJzdiI6MSwic3ViIjoiMDE5MmYwYzEtN2IyYS03ODljLThkNGUtMWYyYTNiNGM1ZDdmIiwiYXVkIjoic2RrIiwiaWF0IjoxNzYyOTQwODAwLCJleHAiOjE3NjI5NDE3MDB9.c2lnbmF0dXJl",
+  "expiresIn": 900,
+  "identity": { "userId": null, "name": null, "email": null, "verified": false }
+}

@@ -1,0 +1,23 @@
+{
+  "message": {
+    "id": "01a1cd83-6cda-7bab-ad0b-d39fa3381100",
+    "seq": 1,
+    "sender": "user",
+    "kind": "text",
+    "text": "Hi! The export button does nothing",
+    "card": null,
+    "actionClickedAt": null,
+    "author": null,
+    "byAi": false,
+    "clientId": "32f9ab80-b749-4a57-b6be-ad4c615c44be",
+    "attachments": [],
+    "createdAt": "2026-11-12T02:08:24.790Z"
+  },
+  "conversation": {
+    "id": "01a1cd83-6cd7-74a4-bc1a-9ce687804f3b",
+    "status": "open",
+    "lastSeq": 1,
+    "userReadSeq": 1,
+    "unread": 0
+  }
+}
