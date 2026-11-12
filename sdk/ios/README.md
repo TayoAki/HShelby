@@ -351,8 +351,8 @@ conversation in that app's inbox):
 HIRESHELBY_TEST_API_URL=https://api.example.com HIRESHELBY_TEST_APP_ID=app_… swift test --filter IntegrationTests
 ```
 
-CI: `.github/workflows/ios-sdk.yml` in the main repository.
+CI: `.github/workflows/ci.yml` (this package is published from `sdk/ios` in Hire Shelby's main repository, where `.github/workflows/ios-sdk.yml` runs the same checks).
 
 ## License
 
-To be decided; see [LICENSE](LICENSE).
+MIT. See [LICENSE](LICENSE).

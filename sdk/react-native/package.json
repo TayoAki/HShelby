@@ -41,7 +41,7 @@
     "url": "https://github.com/tayoaki/hireshelby-react-native/issues"
   },
   "author": "HireShelby",
-  "license": "SEE LICENSE IN LICENSE",
+  "license": "MIT",
   "peerDependencies": {
     "expo": ">=55",
     "react": "*",
