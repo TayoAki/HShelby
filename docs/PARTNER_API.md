@@ -1,88 +1,51 @@
 # Partner API
 
-For app builders that add Hire Shelby to the apps they build for their users (App Builder is the first). The
-partner creates a Hire Shelby app for each project, builds its App ID into the app, and the project's owner answers
-their users' chats in the Hire Shelby dashboard. Owners don't need an account first: they're invited, and the
-invitation lets them sign up even while sign-ups are invite-only.
+App Builder (our AI app builder) includes Hire Shelby in the apps it builds: it creates a workspace for each paying
+user and an app per project, keeps each workspace's state, gives the owner a one-time link to join, and reads what
+AI replies cost so it can charge credits. The contract is App Builder's
+[`docs/11-hire-shelby-partner.md`](https://github.com/TayoAki/TeachMeKanji/blob/main/docs/11-hire-shelby-partner.md);
+this is Hire Shelby's side (`apps/api/src/routes/partner.ts`, tests in `apps/api/test/partner.test.ts`).
 
-Base URL: `https://api.hireshelby.com/partner/v1` (staging: the staging API's URL). Every call sends the partner's
-key: `Authorization: Bearer <key>`. JSON in and out; errors are `{ "error": { "code", "message" } }`. 300 calls a
-minute per partner (429 with `Retry-After` past it).
+## Setup
 
-## Keys
+- `PARTNER_API_KEY` on the api (at least 32 characters; generate it in Railway). App Builder sends the same value as
+  `HIRESHELBY_PARTNER_KEY`, with `HIRESHELBY_API_URL` set to the API's URL. Without a key the routes answer 404.
+- `PARTNER_NAME` (default `appbuilder`): every call only touches this partner's workspaces.
+- Auth: `Authorization: Bearer <key>`, compared in constant time (401 otherwise); 300 calls a minute.
 
-The api's `PARTNERS` variable lists partners as `id:key`, comma separated: a lowercase slug id (`app-builder`,
-shown to owners as "App Builder") and a random key (`openssl rand -hex 32`). The same key goes in the partner's own
-server-side configuration, never in an app. To rotate it, replace the key in both places and redeploy; there's one key per partner.
+## Calls (prefix `/partner/v1`)
 
-`PARTNER_BETA_DAYS` (default 90): how long a partner-created workspace counts as subscribed during the closed beta.
+| Call | Body | Answer |
+|---|---|---|
+| `PUT /workspaces/:externalId` | `{ name, ownerEmail }` | `{ workspace }` (201 new, 200 renamed) |
+| `PATCH /workspaces/:externalId` | `{ active?, aiAllowed?, ownerEmail? }` | `{ workspace }` |
+| `POST /workspaces/:externalId/claim-link` | none | `{ url }` |
+| `PUT /workspaces/:externalId/apps/:appExternalId` | `{ name, bundleId? }` | `{ app }` (201 new, 200 renamed) |
+| `DELETE /workspaces/:externalId/apps/:appExternalId` | none | 204 (also when already deleted) |
+| `GET /usage?after=<id>&limit=<1–500, default 200>` | none | `{ items, next }` |
 
-## Create the app: `PUT /apps/:externalId`
+- `workspace`: `{ externalId, active, aiAllowed, claimed, dashboardUrl }`. A new one starts active with AI allowed and
+  no members; `claimed` once someone joined; `dashboardUrl` is the dashboard's origin.
+- `app`: `{ externalId, appId, name }`; `appId` is the public `app_…` ID the SDK takes. Created like the dashboard's
+  apps but without its subscription check. A deleted project's next PUT gets a new app.
+- `claim-link`: the dashboard's URL once a member has the workspace's owner email; otherwise a new one-time link
+  `/claim/<token>` for that email, valid 7 days (stored as the token's SHA-256 in `partner_claims`).
+- `usage`: AI runs on the partner's apps that called the model, oldest first after `after`; each
+  `{ id, workspaceExternalId, appExternalId, costUsd, createdAt }`. `costUsd` prices the run's input, output,
+  cache-read and cache-write tokens with `packages/core/src/pricing.ts` (Claude Opus 5.5: $4 / $20 / $0.20 / $5 per
+  million) for the model the run recorded, or the configured model for older runs. `next` is the last id returned, or
+  `null` when there's nothing new. No message content ever leaves through this API.
 
-`externalId` is the partner's own project ID (1–128 of `A–Z a–z 0–9 . _ : -`). The call is idempotent: the first
-creates the app (201), later ones return it (200) and renew the owner's invitation if it expired.
+Audit events: `partner.workspace.created`, `partner.workspace.updated`, `partner.app.created`, `app.deleted`.
 
-```json
-{ "name": "Habit Tracker", "owner": { "email": "olive@example.com", "name": "Olive Owner" }, "bundleId": "com.example.habit" }
-```
+## What a partner workspace changes
 
-`owner.name` and `bundleId` are optional. Answer (also from `GET /apps/:externalId`):
-
-```json
-{
-  "externalId": "proj_123",
-  "app": { "id": "…", "appId": "app_XXXXXXXXXXXXXXXXXXXXXX", "name": "Habit Tracker", "bundleId": "com.example.habit" },
-  "workspace": { "id": "…", "name": "Olive's App Builder apps" },
-  "owner": { "email": "olive@example.com", "status": "invited", "invitationExpiresAt": "2027-02-10T…" },
-  "urls": {
-    "inbox": "https://app.hireshelby.com/inbox",
-    "signUp": "https://app.hireshelby.com/sign-up?email=olive%40example.com&next=%2Finbox",
-    "signIn": "https://app.hireshelby.com/sign-in?next=%2Finbox"
-  },
-  "apiBaseUrl": "https://api.hireshelby.com",
-  "push": { "configured": false, "bundleId": null, "issue": null },
-  "createdAt": "…"
-}
-```
-
-- **`app.appId`** goes into the app: `HireShelby.configure("app_…")`. It works at once, before the owner joins;
-  messages wait in the inbox.
-- **One workspace per owner and partner.** An owner's projects share it, with beta access for
-  `PARTNER_BETA_DAYS`. A different owner for an existing project is `409 owner_mismatch` (delete the app first).
-- **The owner** (`owner.status`): `member` if they already had an account (they're added straight away), `invited`
-  until they sign up with that address (they land in the workspace as its owner, without an empty workspace of
-  their own), `expired` after 90 days unanswered (PUT again). Show `urls.signUp` (or `urls.inbox` for members) in
-  the partner's own UI. When the api has an email key, Hire Shelby also emails the owner once.
-
-## Push: `PUT /apps/:externalId/push`
-
-The APNs auth key and notification settings, as in the dashboard's Push settings. The key is checked, stored
-encrypted and never returned; leaving `p8` out keeps the stored one.
-
-```json
-{ "teamId": "ABCDE12345", "keyId": "KEY1234567", "bundleId": "com.example.habit", "p8": "-----BEGIN PRIVATE KEY-----\n…" }
-```
-
-Optional: `titleTemplate`, `bodyTemplate` (`{app}`, `{agent}`, `{message}`), `senderName`, `showPreview`, `sound`.
-Answers with the app (`push.configured: true`). A key APNs later rejects shows in `push.issue`.
-
-With a key in place, replies reach the phone once the app has notification permission: the React Native SDK
-forwards the device token itself (see `sdk/react-native/README.md`).
-
-## Delete: `DELETE /apps/:externalId`
-
-Deletes the app and its conversations (204). The project ID can be used again, and the owner's workspace stays
-theirs.
-
-## In the app (React Native, Expo)
-
-```ts
-import { HireShelby } from "@hireshelby/react-native";
-
-HireShelby.configure("app_…", { theme: { accentColor: "#FF5A1F" } }); // once, at startup
-HireShelby.identify({ userId, name, email });                         // after sign-in, if the app has accounts
-<Button title="Support" onPress={() => HireShelby.presentChat()} />
-```
-
-Build with a development or release build (not Expo Go). Notification taps: pass expo-notifications' response to
-`HireShelby.handleNotification(response)`.
+- **Billing:** it counts as subscribed exactly while `active` (before Stripe and beta access are looked at). The
+  dashboard says "Included with App Builder" instead of offering Checkout; when App Builder marks it inactive, replies
+  lock as in an unpaid workspace (users can still write in).
+- **AI replies:** with `aiAllowed` off (out of credits), `ai.consider` returns `disabled` and the chat stops asking
+  people about AI replies; the team still gets every message.
+- **Joining:** the owner opens the claim link (`apps/dashboard/src/app/claim/[token]`), signs up or in with the
+  address it was made for (a valid claim lets them sign up while sign-ups are invite-only, without an empty
+  workspace of their own) and joins as owner (`POST /api/partner-claims/:token/accept`). A used or expired link says
+  so and offers sign-in.

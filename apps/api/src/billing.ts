@@ -7,6 +7,7 @@ import type Stripe from "stripe";
 import type { Env } from "./env";
 import { ApiError } from "./errors";
 import { isAdminRole } from "./middleware";
+import { partnerDisplayName, partnerWorkspaceOf } from "./partners";
 
 /*
  * One flat subscription per organization. Without an active one, end users can still write in and nothing
@@ -52,7 +53,13 @@ export function createBilling({ db, env, stripe, logger }: { db: Db; env: Env; s
     return row?.until ?? null;
   }
 
+  /**
+   * A workspace a partner (App Builder) created is billed by the partner: it's active exactly while the partner
+   * says so, whatever Stripe and beta access say.
+   */
   async function isActive(organizationId: string) {
+    const partner = await partnerWorkspaceOf(db, organizationId);
+    if (partner) return partner.active;
     if (!stripe) return true;
     if (await betaUntil(organizationId)) return true;
     return isEntitled((await organizationSubscription(db, organizationId))?.status);
@@ -93,7 +100,13 @@ export function createBilling({ db, env, stripe, logger }: { db: Db; env: Env; s
 
     async state(organizationId: string, role: string): Promise<BillingState> {
       const canManage = isAdminRole(role);
-      if (!stripe) return { enabled: false, active: true, subscription: null, offer: null, beta: null, canManage };
+      const partner = await partnerWorkspaceOf(db, organizationId);
+      if (partner) {
+        // included with the partner's plan: nothing to check out here
+        const name = partnerDisplayName(partner.partner);
+        return { enabled: true, active: partner.active, subscription: null, offer: null, beta: null, partner: { name, active: partner.active }, canManage };
+      }
+      if (!stripe) return { enabled: false, active: true, subscription: null, offer: null, beta: null, partner: null, canManage };
       const [sub, beta] = await Promise.all([organizationSubscription(db, organizationId), betaUntil(organizationId)]);
       // a row without a Stripe subscription is a checkout that was started and never finished
       const shown = sub?.stripeSubscriptionId ? sub : null;
@@ -101,6 +114,7 @@ export function createBilling({ db, env, stripe, logger }: { db: Db; env: Env; s
         enabled: true,
         active: Boolean(beta) || isEntitled(sub?.status),
         beta: beta && { until: beta.toISOString() },
+        partner: null,
         subscription: shown && {
           plan: shown.plan,
           status: shown.status,
@@ -124,7 +138,12 @@ export function createBilling({ db, env, stripe, logger }: { db: Db; env: Env; s
         .limit(1);
       // an unknown conversation is the route's 404 to give
       if (!row || row.setupConversationId === conversationId) return;
-      throw inactive("Subscribe to reply. Your users can still write in, and nothing is lost.");
+      const partner = await partnerWorkspaceOf(db, organizationId);
+      throw inactive(
+        partner
+          ? `Your ${partnerDisplayName(partner.partner)} plan has ended, so replies are paused. Your users can still write in, and nothing is lost.`
+          : "Subscribe to reply. Your users can still write in, and nothing is lost.",
+      );
     },
 
     /** The first app is free to set up; more need a subscription. */

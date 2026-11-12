@@ -15,6 +15,7 @@ import { appRoutes } from "./routes/apps";
 import { automationRoutes } from "./routes/automations";
 import { integrationRoutes, providerWebhookRoutes } from "./routes/integrations";
 import { partnerRoutes } from "./routes/partner";
+import { partnerClaimRoutes } from "./routes/partner-claims";
 import { conversationRoutes, deviceRoutes } from "./routes/inbox";
 import { pushRoutes } from "./routes/push";
 import { sdkRoutes } from "./routes/sdk";
@@ -55,6 +56,12 @@ export function createApp(deps: Deps) {
       maxSize: kb * 1024,
       onError: (c) => c.json({ error: { code: "validation_failed", message: "Body too large" } }, 413),
     });
+
+  // A partner's claim links: read signed out, accepted by someone who may have no workspace yet.
+  const claims = new Hono<AppEnv>();
+  claims.use("*", limitBody(4));
+  claims.route("/", partnerClaimRoutes(deps));
+  app.route("/api/partner-claims", claims);
 
   // Dashboard API: Better Auth session cookie, scoped to the active organization.
   const api = new Hono<AppEnv>();

@@ -23,7 +23,7 @@ import {
   type UploadTicket,
 } from "@hshelby/contracts";
 import { decryptSecret, newDeviceSecret, uuidv7 } from "@hshelby/core";
-import { aiSettings, appAppearance, apps, attachments, automations, conversations, devices, messages, type Db, type Tx } from "@hshelby/db";
+import { aiSettings, appAppearance, apps, attachments, automations, conversations, devices, messages, partnerWorkspaces, type Db, type Tx } from "@hshelby/db";
 import { and, count, desc, eq, gt, isNull, ne, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { createMiddleware } from "hono/factory";
@@ -65,8 +65,14 @@ type SdkApp = SdkEnv["Variables"]["app"];
  */
 async function sdkAi(deps: Deps, appId: string, consent: SdkAi["consent"]): Promise<SdkAi> {
   if (!deps.ai) return { enabled: false, consent, processors: [] };
-  const [row] = await deps.db.select({ enabled: aiSettings.enabled }).from(aiSettings).where(eq(aiSettings.appId, appId));
-  const enabled = row?.enabled ?? false;
+  const [row] = await deps.db
+    .select({ enabled: aiSettings.enabled, partnerAllows: partnerWorkspaces.aiAllowed })
+    .from(aiSettings)
+    .innerJoin(apps, eq(apps.id, aiSettings.appId))
+    .leftJoin(partnerWorkspaces, eq(partnerWorkspaces.organizationId, apps.organizationId))
+    .where(eq(aiSettings.appId, appId));
+  // a partner can turn AI replies off for its workspace (App Builder, out of credits)
+  const enabled = (row?.enabled ?? false) && row?.partnerAllows !== false;
   return { enabled, consent, processors: enabled ? deps.ai.processors : [] };
 }
 type Author = SdkMessage["author"];

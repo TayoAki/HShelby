@@ -24,6 +24,12 @@ Not chosen by us, but data leaves through them once a team sets them up:
 | Telegram | The team connects its own bot | New messages, replies and handovers posted to the team's chat, with the person's name and app details |
 | RevenueCat, Superwall, Adapty, App Store Server Notifications | The team connects one | They send us subscription events (app user ID, product, status); we send them nothing |
 
+## Partners
+
+| Partner | When | Data |
+|---|---|---|
+| App Builder (our AI app builder, a sister product) | Workspaces it creates through the partner API (`docs/PARTNER_API.md`) | It sends us the owner's email, workspace and app names; we send it back workspace and app state (IDs, active, AI allowed, claimed) and each AI reply's cost. Never message content or End Users' data |
+
 ## Not in use yet
 
 - **Error tracking, analytics, uptime monitoring:** none.

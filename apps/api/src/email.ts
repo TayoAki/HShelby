@@ -84,18 +84,3 @@ export function invitationEmail(to: string, inviter: string, workspace: string, 
   );
   return { to, subject: `${inviter} invited you to ${workspace} on ${brand.name}`, text, html };
 }
-
-/** A partner (an app builder) set up the support chat for someone's app: where to answer their users. */
-export function partnerWelcomeEmail(to: string, partner: string, appName: string, url: string, hasAccount: boolean): Email {
-  const { text, html } = layout(
-    [
-      `${partner} added a support chat to ${appName}. Your users can now write to you from inside the app.`,
-      hasAccount
-        ? `It's in your ${brand.name} account: sign in to answer them, from the dashboard or your phone.`
-        : `Create your ${brand.name} account with ${to} to answer them, from the dashboard or your phone.`,
-    ],
-    { label: hasAccount ? "Open the inbox" : "Create your account", url },
-    `You're getting this because ${partner} set up ${appName} for ${to}. If that wasn't you, ignore this email.`,
-  );
-  return { to, subject: `Your users can now message you in ${appName}`, text, html };
-}

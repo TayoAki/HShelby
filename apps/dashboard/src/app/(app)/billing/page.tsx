@@ -63,6 +63,17 @@ export default function BillingPage() {
               </SettingsCard>
             )}
 
+            {billing.partner && (
+              <SettingsCard title={`Included with ${billing.partner.name}`}>
+                <p className="text-[15px]">
+                  {billing.partner.active
+                    ? `Hire Shelby comes with your ${billing.partner.name} plan: every app and teammate here, nothing to pay separately.`
+                    : `Your ${billing.partner.name} plan has ended, so replies are paused. Users can still write in, and nothing is lost; renew in ${billing.partner.name} to reply again.`}
+                </p>
+                <p className="mt-2 text-[14px] text-secondary">AI replies use your {billing.partner.name} credits.</p>
+              </SettingsCard>
+            )}
+
             {billing.enabled && billing.beta && !sub && (
               <SettingsCard title="Beta access">
                 <p className="text-[15px]">
@@ -72,7 +83,7 @@ export default function BillingPage() {
               </SettingsCard>
             )}
 
-            {billing.enabled && billing.active && sub && (
+            {!billing.partner && billing.enabled && billing.active && sub && (
               <SettingsCard title={planName(sub.plan)}>
                 <Suspense fallback={null}>
                   <JustSubscribed />
@@ -92,7 +103,7 @@ export default function BillingPage() {
               </SettingsCard>
             )}
 
-            {billing.enabled && !billing.active && (
+            {!billing.partner && billing.enabled && !billing.active && (
               <>
                 <SettingsCard title={sub ? "Your subscription has ended" : "Not subscribed yet"}>
                   <p className="text-[15px]">

@@ -8,6 +8,7 @@ import type { Deps } from "../context";
 import { ApiError } from "../errors";
 import type { AiConsiderJob } from "../jobs";
 import { appendAgentMessage, type AppendHooks, type ConversationRow } from "../messaging";
+import { partnerWorkspaceOf } from "../partners";
 import { publishLive } from "../realtime/events";
 import { Halted, Refused, runTurn, type Executor, type TurnResult } from "./assistant";
 import { offersFor, reviewUnavailable, systemPrompt, turnPrompt, TRANSCRIPT_MESSAGES, type PersonFacts, type TranscriptMessage } from "./prompt";
@@ -197,6 +198,8 @@ export async function considerMessage(deps: Deps, job: AiConsiderJob): Promise<s
 
   const settings = await getAiSettings(db, row.app.id);
   if (!settings.enabled) return "disabled";
+  // a partner (App Builder) turns AI replies off when its user runs out of credits; the team still gets the message
+  if ((await partnerWorkspaceOf(db, row.conversation.organizationId))?.aiAllowed === false) return "disabled";
   if (!deps.ai) return "unavailable";
   // nothing of theirs goes to the model until they allow it in the chat (App Review 5.1.2(i))
   if (row.device.aiConsent !== "granted") return "no_consent";
@@ -226,6 +229,7 @@ export async function considerMessage(deps: Deps, job: AiConsiderJob): Promise<s
       notes: result.notes,
       error,
       fallback: result.fallback,
+      model: deps.ai?.model ?? null,
       ...result.usage,
       latencyMs,
     });

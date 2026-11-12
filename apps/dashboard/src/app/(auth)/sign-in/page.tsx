@@ -8,6 +8,8 @@ import { safeNext, useSearch } from "@/lib/use-search";
 
 export default function SignInPage() {
   const search = useSearch();
+  // a link to join a workspace names the address it was made for
+  const invitedEmail = new URLSearchParams(search).get("email") ?? "";
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -43,7 +45,7 @@ export default function SignInPage() {
       }
     >
       <form onSubmit={onSubmit} className="space-y-4">
-        <Field label="Email" name="email" type="email" autoComplete="email" required />
+        <Field key={invitedEmail} label="Email" name="email" type="email" autoComplete="email" required defaultValue={invitedEmail} />
         <Field label="Password" name="password" type="password" autoComplete="current-password" required />
         <p className="-mt-1 text-right text-[13px]">
           <Link href="/forgot-password" className="text-secondary underline-offset-4 hover:text-fg hover:underline">

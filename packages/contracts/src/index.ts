@@ -21,7 +21,7 @@ export const errorCodes = [
   "validation_failed",
   "no_active_organization",
   "app_already_added",
-  "owner_mismatch",
+  "partner_app_conflict",
   "app_store_unavailable",
   "billing_not_configured",
   "device_blocked",

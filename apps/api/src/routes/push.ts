@@ -29,11 +29,11 @@ const toDto = (c: PushConfigRow): PushConfig => ({
 
 /**
  * Stores an app's APNs key and notification settings (a new key is checked and encrypted; leaving it out keeps the
- * stored one), audited. Shared by the dashboard and the partner API.
+ * stored one), audited.
  */
 export async function savePushConfig(
   deps: Pick<Deps, "db" | "keyring">,
-  target: { appId: string; organizationId: string; userId: string | null; partner?: string },
+  target: { appId: string; organizationId: string; userId: string | null },
   input: PushConfigInput,
 ): Promise<PushConfigRow> {
   const { db } = deps;
@@ -77,7 +77,6 @@ export async function savePushConfig(
       userId: target.userId,
       action: parsed.p8 ? "app.push.key_uploaded" : "app.push.updated",
       target: target.appId,
-      ...(target.partner && { metadata: { partner: target.partner } }),
     });
     return row!;
   });

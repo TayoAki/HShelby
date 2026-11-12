@@ -1,274 +1,280 @@
-import { PartnerAppInput, PartnerExternalId, PushConfigInput, type PartnerApp } from "@hshelby/contracts";
-import { encryptSecret, newIdentitySecret, newPublicAppId, uuidv7 } from "@hshelby/core";
-import { apps, auditEvents, betaAccess, invitations, members, organizations, partnerApps, pushConfigs, users, type Db, type Tx } from "@hshelby/db";
-import { and, desc, eq, gt, sql } from "drizzle-orm";
+import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
+import {
+  PartnerAppInput,
+  PartnerExternalId,
+  PartnerUsageQuery,
+  PartnerWorkspaceInput,
+  PartnerWorkspacePatch,
+  type PartnerApp,
+  type PartnerUsage,
+  type PartnerWorkspace,
+} from "@hshelby/contracts";
+import { base62, encryptSecret, newIdentitySecret, newPublicAppId, tokenCostUsd, uuidv7 } from "@hshelby/core";
+import { aiRuns, apps, auditEvents, members, organizations, partnerApps, partnerClaims, partnerWorkspaces, users, type Db, type Tx } from "@hshelby/db";
+import { and, asc, count, eq, gt, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { createMiddleware } from "hono/factory";
 import type { Deps } from "../context";
-import { partnerWelcomeEmail } from "../email";
 import { ApiError, notFound } from "../errors";
-import { parsePartners, partnerServiceEmail, type Partner } from "../partners";
+import { hashClaimToken } from "../partners";
 import { LIMITS } from "../rate-limit";
-import { parseJson } from "../validation";
-import { savePushConfig } from "./push";
+import { parseJson, parseQuery } from "../validation";
 
-type PartnerEnv = { Variables: { partner: Partner; requestId: string } };
+type PartnerEnv = { Variables: { requestId: string } };
+type WorkspaceRow = typeof partnerWorkspaces.$inferSelect;
 
-/** How long an owner's invitation stays open; the partner's next PUT renews an expired one. */
-const INVITATION_DAYS = 90;
-const DAY = 86_400_000;
+/** How long a claim link works. */
+const CLAIM_DAYS = 7;
 
-const slug = (s: string) =>
+const slugify = (s: string) =>
   s
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-|-$/g, "")
     .slice(0, 40) || "workspace";
 
+const digest = (s: string) => createHash("sha256").update(s).digest();
+
 /**
- * The partner API, under /partner/v1: a partner (an app builder) creates a Hire Shelby app for each project it
- * builds, for the project's owner, and gets the App ID to build into the app. Authenticated with the partner's key
- * (`Authorization: Bearer …`, configured in PARTNERS). Every call is idempotent by the partner's project ID.
+ * The partner API, under /partner/v1: App Builder includes Hire Shelby in the apps it builds (see
+ * docs/PARTNER_API.md). One partner per deployment: PARTNER_API_KEY authenticates it, PARTNER_NAME scopes every
+ * call to its workspaces. Without a key the routes don't exist (404). Every call is idempotent on the partner's ids.
  */
 export function partnerRoutes(deps: Deps) {
   const { db, env } = deps;
   const r = new Hono<PartnerEnv>();
-  const partnerFor = parsePartners(env.PARTNERS);
-  const dashboard = env.BETTER_AUTH_URL.replace(/\/$/, "");
-  const apiBaseUrl = (env.PUBLIC_API_URL ?? "https://api.hireshelby.com").replace(/\/$/, "");
+  const partner = env.PARTNER_NAME;
+  const dashboardUrl = new URL(env.BETTER_AUTH_URL).origin;
+  const expected = env.PARTNER_API_KEY ? digest(env.PARTNER_API_KEY) : null;
 
   r.use(
     "*",
     createMiddleware<PartnerEnv>(async (c, next) => {
+      if (!expected) throw new ApiError(404, "not_found", "Route not found");
       const header = c.req.header("authorization");
-      const partner = partnerFor(header?.startsWith("Bearer ") ? header.slice(7).trim() : undefined);
-      if (!partner) throw new ApiError(401, "unauthorized", "A partner key is missing or wrong");
-      deps.rateLimiter.hit(LIMITS.partner, partner.id);
-      c.set("partner", partner);
+      const presented = header?.startsWith("Bearer ") ? header.slice(7).trim() : "";
+      // compare digests, so the comparison takes the same time whatever the presented key's length
+      if (!presented || !timingSafeEqual(digest(presented), expected)) {
+        throw new ApiError(401, "unauthorized", "The partner key is missing or wrong");
+      }
+      deps.rateLimiter.hit(LIMITS.partner, partner);
       await next();
     }),
   );
 
-  const externalIdOf = (raw: string) => {
+  const idOf = (raw: string, field: string) => {
     const parsed = PartnerExternalId.safeParse(raw);
-    if (!parsed.success) throw new ApiError(400, "validation_failed", `externalId: ${parsed.error.issues[0]!.message}`);
+    if (!parsed.success) throw new ApiError(400, "validation_failed", `${field}: ${parsed.error.issues[0]!.message}`);
     return parsed.data;
   };
 
-  async function find(partner: Partner, externalId: string) {
-    const [row] = await db
-      .select({ link: partnerApps, app: apps, workspace: organizations })
-      .from(partnerApps)
-      .innerJoin(apps, eq(apps.id, partnerApps.appId))
-      .innerJoin(organizations, eq(organizations.id, partnerApps.organizationId))
-      .where(and(eq(partnerApps.partner, partner.id), eq(partnerApps.externalId, externalId), sql`${apps.deletedAt} is null`))
+  const audit = (tx: Db | Tx, organizationId: string, action: string, target: string, metadata: Record<string, unknown>) =>
+    tx.insert(auditEvents).values({ id: uuidv7(), organizationId, userId: null, action, target, metadata: { partner, ...metadata } });
+
+  async function findWorkspace(tx: Db | Tx, externalId: string) {
+    const [row] = await tx
+      .select()
+      .from(partnerWorkspaces)
+      .where(and(eq(partnerWorkspaces.partner, partner), eq(partnerWorkspaces.externalId, externalId)))
       .limit(1);
     return row ?? null;
   }
 
-  /** The partner's service account, which invites owners (made on first use; it has no password, so no sign-in). */
-  async function serviceUser(tx: Db | Tx, partner: Partner) {
-    const email = partnerServiceEmail(partner);
-    await tx
-      .insert(users)
-      .values({ id: uuidv7(), name: partner.name, email, emailVerified: false })
-      .onConflictDoNothing({ target: users.email });
-    const [user] = await tx.select({ id: users.id }).from(users).where(eq(users.email, email));
-    return user!;
+  async function requireWorkspace(tx: Db | Tx, externalId: string) {
+    const row = await findWorkspace(tx, externalId);
+    if (!row) throw notFound("Workspace");
+    return row;
   }
+
+  async function toWorkspace(row: WorkspaceRow): Promise<PartnerWorkspace> {
+    const [joined] = await db.select({ n: count() }).from(members).where(eq(members.organizationId, row.organizationId));
+    return { externalId: row.externalId, active: row.active, aiAllowed: row.aiAllowed, claimed: joined!.n > 0, dashboardUrl };
+  }
+
+  /** Creates the workspace (an organization with no members yet), or renames it and updates its owner. */
+  r.put("/workspaces/:externalId", async (c) => {
+    const externalId = idOf(c.req.param("externalId"), "externalId");
+    const input = await parseJson(c, PartnerWorkspaceInput);
+    const { row, created } = await db.transaction(async (tx) => {
+      const existing = await findWorkspace(tx, externalId);
+      if (existing) {
+        await tx.update(organizations).set({ name: input.name }).where(eq(organizations.id, existing.organizationId));
+        if (existing.ownerEmail === input.ownerEmail) return { row: existing, created: false };
+        const [updated] = await tx
+          .update(partnerWorkspaces)
+          .set({ ownerEmail: input.ownerEmail, updatedAt: new Date() })
+          .where(eq(partnerWorkspaces.organizationId, existing.organizationId))
+          .returning();
+        await audit(tx, existing.organizationId, "partner.workspace.updated", existing.organizationId, { externalId, ownerEmail: input.ownerEmail });
+        return { row: updated!, created: false };
+      }
+      const organizationId = uuidv7();
+      await tx.insert(organizations).values({ id: organizationId, name: input.name, slug: `${slugify(input.name)}-${base62(6).toLowerCase()}` });
+      const [row] = await tx
+        .insert(partnerWorkspaces)
+        .values({ organizationId, partner, externalId, ownerEmail: input.ownerEmail })
+        .returning();
+      await audit(tx, organizationId, "partner.workspace.created", organizationId, { externalId, ownerEmail: input.ownerEmail });
+      return { row: row!, created: true };
+    });
+    return c.json({ workspace: await toWorkspace(row) }, created ? 201 : 200);
+  });
+
+  /** The workspace's state: `active` while the owner's plan is paid, `aiAllowed` while they have credits. */
+  r.patch("/workspaces/:externalId", async (c) => {
+    const externalId = idOf(c.req.param("externalId"), "externalId");
+    const input = await parseJson(c, PartnerWorkspacePatch);
+    const row = await db.transaction(async (tx) => {
+      const existing = await requireWorkspace(tx, externalId);
+      const changes = Object.fromEntries(
+        Object.entries({ active: input.active, aiAllowed: input.aiAllowed, ownerEmail: input.ownerEmail }).filter(
+          ([key, value]) => value !== undefined && value !== existing[key as keyof WorkspaceRow],
+        ),
+      );
+      if (Object.keys(changes).length === 0) return existing;
+      const [updated] = await tx
+        .update(partnerWorkspaces)
+        .set({ ...changes, updatedAt: new Date() })
+        .where(eq(partnerWorkspaces.organizationId, existing.organizationId))
+        .returning();
+      await audit(tx, existing.organizationId, "partner.workspace.updated", existing.organizationId, { externalId, ...changes });
+      return updated!;
+    });
+    return c.json({ workspace: await toWorkspace(row) });
+  });
 
   /**
-   * Makes sure the owner can get in: a member already if they have an account, otherwise a pending invitation
-   * (renewed when expired). Returns whether anything new happened, for the welcome email.
+   * Where the owner answers chats: the dashboard once they've joined with the workspace's owner email, otherwise a
+   * new one-time claim link for that email (7 days).
    */
-  async function ensureOwner(tx: Db | Tx, partner: Partner, organizationId: string, email: string) {
-    const [user] = await tx.select({ id: users.id }).from(users).where(eq(sql`lower(${users.email})`, email)).limit(1);
-    if (user) {
-      const added = await tx
-        .insert(members)
-        .values({ id: uuidv7(), organizationId, userId: user.id, role: "owner" })
-        .onConflictDoNothing({ target: [members.organizationId, members.userId] })
-        .returning({ id: members.id });
-      return { changed: added.length > 0, hasAccount: true };
-    }
-    const [pending] = await tx
-      .select({ id: invitations.id })
-      .from(invitations)
-      .where(
-        and(
-          eq(invitations.organizationId, organizationId),
-          eq(sql`lower(${invitations.email})`, email),
-          eq(invitations.status, "pending"),
-          gt(invitations.expiresAt, new Date()),
-        ),
-      )
-      .limit(1);
-    if (pending) return { changed: false, hasAccount: false };
-    const inviter = await serviceUser(tx, partner);
-    await tx.insert(invitations).values({
-      id: uuidv7(),
-      organizationId,
-      email,
-      role: "owner",
-      status: "pending",
-      expiresAt: new Date(Date.now() + INVITATION_DAYS * DAY),
-      inviterId: inviter.id,
-    });
-    return { changed: true, hasAccount: false };
-  }
-
-  async function describe(row: NonNullable<Awaited<ReturnType<typeof find>>>): Promise<PartnerApp> {
-    const { link, app, workspace } = row;
-    const email = link.ownerEmail;
-    const [member] = await db
+  r.post("/workspaces/:externalId/claim-link", async (c) => {
+    const row = await requireWorkspace(db, idOf(c.req.param("externalId"), "externalId"));
+    const [owner] = await db
       .select({ id: members.id })
       .from(members)
       .innerJoin(users, eq(users.id, members.userId))
-      .where(and(eq(members.organizationId, workspace.id), eq(sql`lower(${users.email})`, email)))
+      .where(and(eq(members.organizationId, row.organizationId), eq(sql`lower(${users.email})`, row.ownerEmail)))
       .limit(1);
-    const [invitation] = member
-      ? []
-      : await db
-          .select({ expiresAt: invitations.expiresAt })
-          .from(invitations)
-          .where(and(eq(invitations.organizationId, workspace.id), eq(sql`lower(${invitations.email})`, email), eq(invitations.status, "pending")))
-          .orderBy(desc(invitations.expiresAt))
-          .limit(1);
-    const status = member ? "member" : invitation && invitation.expiresAt > new Date() ? "invited" : "expired";
-    const [push] = await db.select().from(pushConfigs).where(eq(pushConfigs.appId, app.id));
-    return {
-      externalId: link.externalId,
-      app: { id: app.id, appId: app.publicId, name: app.name, bundleId: app.bundleId },
-      workspace: { id: workspace.id, name: workspace.name },
-      owner: { email, status, invitationExpiresAt: status === "member" ? null : (invitation?.expiresAt.toISOString() ?? null) },
-      urls: {
-        inbox: `${dashboard}/inbox`,
-        signUp: status === "member" ? null : `${dashboard}/sign-up?email=${encodeURIComponent(email)}&next=%2Finbox`,
-        signIn: `${dashboard}/sign-in?next=%2Finbox`,
-      },
-      apiBaseUrl,
-      push: { configured: Boolean(push), bundleId: push?.bundleId ?? null, issue: push?.issue ?? null },
-      createdAt: link.createdAt.toISOString(),
-    };
+    if (owner) return c.json({ url: dashboardUrl });
+    const token = randomBytes(32).toString("base64url");
+    await db.insert(partnerClaims).values({
+      tokenHash: hashClaimToken(token),
+      organizationId: row.organizationId,
+      email: row.ownerEmail,
+      expiresAt: new Date(Date.now() + CLAIM_DAYS * 86_400_000),
+    });
+    return c.json({ url: `${dashboardUrl}/claim/${token}` });
+  });
+
+  async function findApp(tx: Db | Tx, appExternalId: string) {
+    const [row] = await tx
+      .select({ app: apps })
+      .from(partnerApps)
+      .innerJoin(apps, eq(apps.id, partnerApps.appId))
+      .where(and(eq(partnerApps.partner, partner), eq(partnerApps.externalId, appExternalId)))
+      .limit(1);
+    return row?.app ?? null;
   }
 
-  /** Creates the app (and, for an owner's first, their workspace with beta access), or returns the existing one. */
-  r.put("/apps/:externalId", async (c) => {
-    const partner = c.get("partner");
-    const externalId = externalIdOf(c.req.param("externalId"));
+  const toApp = (externalId: string, app: typeof apps.$inferSelect): PartnerApp => ({ externalId, appId: app.publicId, name: app.name });
+
+  /**
+   * Creates the app as the dashboard does (public App ID, identity secret; the first message makes the setup
+   * conversation), without the dashboard's subscription check: the partner pays. A repeat renames it.
+   */
+  r.put("/workspaces/:externalId/apps/:appExternalId", async (c) => {
+    const externalId = idOf(c.req.param("externalId"), "externalId");
+    const appExternalId = idOf(c.req.param("appExternalId"), "appExternalId");
     const input = await parseJson(c, PartnerAppInput);
-    const email = input.owner.email;
-
-    const existing = await find(partner, externalId);
-    if (existing) {
-      if (existing.link.ownerEmail !== email) {
-        throw new ApiError(409, "owner_mismatch", "This project's app belongs to another owner; delete it first to move it");
+    const { app, created } = await db.transaction(async (tx) => {
+      const workspace = await requireWorkspace(tx, externalId);
+      const existing = await findApp(tx, appExternalId);
+      if (existing && !existing.deletedAt) {
+        if (existing.organizationId !== workspace.organizationId) {
+          throw new ApiError(409, "partner_app_conflict", "This project's app belongs to another workspace");
+        }
+        const [renamed] = await tx
+          .update(apps)
+          .set({ name: input.name, ...(input.bundleId && { bundleId: input.bundleId }), updatedAt: new Date() })
+          .where(eq(apps.id, existing.id))
+          .returning();
+        return { app: renamed!, created: false };
       }
-      // renews an expired invitation; the app itself stays as created (the owner may have renamed it)
-      const owner = await db.transaction((tx) => ensureOwner(tx, partner, existing.workspace.id, email));
-      if (owner.changed) await welcome(partner, email, existing.app.name, owner.hasAccount);
-      return c.json(await describe((await find(partner, externalId))!), 200);
-    }
-
-    const created = await db.transaction(async (tx) => {
-      // one workspace per owner and partner: the owner's earlier projects decide it
-      const [earlier] = await tx
-        .select({ organizationId: partnerApps.organizationId })
-        .from(partnerApps)
-        .where(and(eq(partnerApps.partner, partner.id), eq(partnerApps.ownerEmail, email)))
-        .orderBy(desc(partnerApps.createdAt))
-        .limit(1);
-      let organizationId = earlier?.organizationId;
-      if (!organizationId) {
-        organizationId = uuidv7();
-        const first = (input.owner.name ?? email.split("@")[0]!).split(" ")[0]!;
-        const name = `${first}'s ${partner.name} apps`;
-        await tx.insert(organizations).values({ id: organizationId, name, slug: `${slug(name)}-${uuidv7().slice(-8)}` });
-        // the closed beta: a partner's workspace counts as subscribed for PARTNER_BETA_DAYS
-        await tx
-          .insert(betaAccess)
-          .values({ organizationId, until: new Date(Date.now() + env.PARTNER_BETA_DAYS * DAY), note: `partner:${partner.id}` })
-          .onConflictDoNothing();
-      }
+      // a project whose app was deleted gets a new one
+      if (existing) await tx.delete(partnerApps).where(eq(partnerApps.appId, existing.id));
       const [app] = await tx
         .insert(apps)
         .values({
           id: uuidv7(),
-          organizationId,
+          organizationId: workspace.organizationId,
           publicId: newPublicAppId(),
           identitySecretEnc: encryptSecret(newIdentitySecret(), deps.keyring),
           name: input.name,
           bundleId: input.bundleId ?? null,
         })
         .returning();
-      // a project whose app was deleted gets the new one (its link stays, so the owner's workspace is remembered)
-      const link = { appId: app!.id, organizationId, ownerEmail: email, createdAt: new Date() };
-      await tx
-        .insert(partnerApps)
-        .values({ partner: partner.id, externalId, ...link })
-        .onConflictDoUpdate({ target: [partnerApps.partner, partnerApps.externalId], set: link });
-      await tx.insert(auditEvents).values({
-        id: uuidv7(),
-        organizationId,
-        userId: null,
-        action: "partner.app_created",
-        target: app!.id,
-        metadata: { partner: partner.id, externalId, owner: email },
-      });
-      const owner = await ensureOwner(tx, partner, organizationId, email);
-      return { app: app!, owner };
+      await tx.insert(partnerApps).values({ appId: app!.id, partner, externalId: appExternalId });
+      await audit(tx, workspace.organizationId, "partner.app.created", app!.id, { externalId: appExternalId, workspaceExternalId: externalId });
+      return { app: app!, created: true };
     });
-    if (created.owner.changed) await welcome(partner, email, created.app.name, created.owner.hasAccount);
-    return c.json(await describe((await find(partner, externalId))!), 201);
+    return c.json({ app: toApp(appExternalId, app) }, created ? 201 : 200);
   });
 
-  r.get("/apps/:externalId", async (c) => {
-    const row = await find(c.get("partner"), externalIdOf(c.req.param("externalId")));
-    if (!row) throw notFound("App");
-    return c.json(await describe(row));
-  });
-
-  /**
-   * Deletes the app (its conversations go with it, as from the dashboard). The project ID can be used again, and
-   * the owner's workspace stays theirs for their next app.
-   */
-  r.delete("/apps/:externalId", async (c) => {
-    const partner = c.get("partner");
-    const row = await find(partner, externalIdOf(c.req.param("externalId")));
-    if (!row) throw notFound("App");
+  /** Deletes the app as the dashboard does (its conversations go with it); deleting it again is fine. */
+  r.delete("/workspaces/:externalId/apps/:appExternalId", async (c) => {
+    const externalId = idOf(c.req.param("externalId"), "externalId");
+    const appExternalId = idOf(c.req.param("appExternalId"), "appExternalId");
     await db.transaction(async (tx) => {
-      await tx.update(apps).set({ deletedAt: new Date() }).where(eq(apps.id, row.app.id));
-      await tx.insert(auditEvents).values({
-        id: uuidv7(),
-        organizationId: row.workspace.id,
-        userId: null,
-        action: "app.deleted",
-        target: row.app.id,
-        metadata: { partner: partner.id, externalId: row.link.externalId },
-      });
+      const workspace = await requireWorkspace(tx, externalId);
+      const app = await findApp(tx, appExternalId);
+      if (!app || app.deletedAt || app.organizationId !== workspace.organizationId) return;
+      await tx.update(apps).set({ deletedAt: new Date() }).where(eq(apps.id, app.id));
+      await audit(tx, workspace.organizationId, "app.deleted", app.id, { externalId: appExternalId });
     });
     return c.body(null, 204);
   });
 
-  /** The app's APNs key and notification settings, as in the dashboard's Push settings (the key never comes back). */
-  r.put("/apps/:externalId/push", async (c) => {
-    const partner = c.get("partner");
-    const row = await find(partner, externalIdOf(c.req.param("externalId")));
-    if (!row) throw notFound("App");
-    const input = await parseJson(c, PushConfigInput);
-    await savePushConfig(deps, { appId: row.app.id, organizationId: row.workspace.id, userId: null, partner: partner.id }, input);
-    return c.json(await describe(row));
+  /**
+   * AI runs on the partner's apps that called the model, oldest first after the cursor, with what each cost: App
+   * Builder charges its users credits for them. No message content.
+   */
+  r.get("/usage", async (c) => {
+    const { after, limit } = parseQuery(c, PartnerUsageQuery);
+    const rows = await db
+      .select({
+        id: aiRuns.id,
+        model: aiRuns.model,
+        inputTokens: aiRuns.inputTokens,
+        outputTokens: aiRuns.outputTokens,
+        cacheReadTokens: aiRuns.cacheReadTokens,
+        cacheWriteTokens: aiRuns.cacheWriteTokens,
+        createdAt: aiRuns.createdAt,
+        appExternalId: partnerApps.externalId,
+        workspaceExternalId: partnerWorkspaces.externalId,
+      })
+      .from(aiRuns)
+      .innerJoin(partnerApps, and(eq(partnerApps.appId, aiRuns.appId), eq(partnerApps.partner, partner)))
+      .innerJoin(apps, eq(apps.id, aiRuns.appId))
+      .innerJoin(partnerWorkspaces, and(eq(partnerWorkspaces.organizationId, apps.organizationId), eq(partnerWorkspaces.partner, partner)))
+      .where(
+        and(
+          after ? gt(aiRuns.id, after) : undefined,
+          sql`${aiRuns.inputTokens} + ${aiRuns.outputTokens} + ${aiRuns.cacheReadTokens} + ${aiRuns.cacheWriteTokens} > 0`,
+        ),
+      )
+      .orderBy(asc(aiRuns.id))
+      .limit(limit);
+    // runs recorded before the model was stored were answered by the configured model
+    const fallbackModel = deps.ai?.model ?? null;
+    const items = rows.map((r) => ({
+      id: r.id,
+      workspaceExternalId: r.workspaceExternalId,
+      appExternalId: r.appExternalId,
+      costUsd: tokenCostUsd(r, r.model ?? fallbackModel),
+      createdAt: r.createdAt.toISOString(),
+    }));
+    return c.json({ items, next: items.at(-1)?.id ?? null } satisfies PartnerUsage);
   });
-
-  /** Tells the owner where to answer their users; a failed email never fails the call (the partner has the links). */
-  async function welcome(partner: Partner, email: string, appName: string, hasAccount: boolean) {
-    const url = hasAccount ? `${dashboard}/sign-in?next=%2Finbox` : `${dashboard}/sign-up?email=${encodeURIComponent(email)}&next=%2Finbox`;
-    try {
-      await deps.mailer.send(partnerWelcomeEmail(email, partner.name, appName, url, hasAccount));
-    } catch (err) {
-      deps.logger.warn({ err, partner: partner.id }, "partner welcome email not sent");
-    }
-  }
 
   return r;
 }

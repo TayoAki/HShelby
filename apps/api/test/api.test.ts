@@ -142,7 +142,7 @@ describe("apps", () => {
 describe("billing", () => {
   it("reports billing as off when Stripe test keys aren't configured", async () => {
     const { call } = await signUp(app);
-    expect(await (await call("/api/billing")).json() as any).toEqual({ enabled: false, active: true, subscription: null, offer: null, beta: null, canManage: true });
+    expect(await (await call("/api/billing")).json() as any).toEqual({ enabled: false, active: true, subscription: null, offer: null, beta: null, partner: null, canManage: true });
   });
 });
 

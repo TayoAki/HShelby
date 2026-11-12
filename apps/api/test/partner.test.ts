@@ -1,192 +1,311 @@
 /* eslint-disable @typescript-eslint/no-explicit-any -- response bodies are asserted on, not typed */
 import { randomBytes } from "node:crypto";
-import { auditEvents, betaAccess, betaInvites, invitations, members, partnerApps } from "@hshelby/db";
-import { generateP8 } from "@hshelby/push/testing";
-import { and, eq } from "drizzle-orm";
+import Anthropic from "@anthropic-ai/sdk";
+import { startFakeStripe } from "@hshelby/billing/testing";
+import { uuidv7 } from "@hshelby/core";
+import { aiRuns, apps, auditEvents, betaInvites, members, organizations, partnerClaims, partnerWorkspaces, users } from "@hshelby/db";
+import { eq } from "drizzle-orm";
 import { afterAll, describe, expect, it } from "vitest";
-import type { Email } from "../src/email";
-import { parsePartners } from "../src/partners";
-import { makeTestApp, ORIGIN, registerDevice } from "./helpers";
+import { considerMessage } from "../src/ai/consider";
+import { aiProvider } from "../src/ai/provider";
+import { startFakeAnthropic, toolUse } from "./fake-anthropic";
+import { makeTestApp, ORIGIN, registerDevice, reply } from "./helpers";
 
 const KEY = randomBytes(32).toString("hex");
 const OTHER_KEY = randomBytes(32).toString("hex");
-const sent: Email[] = [];
+const stripe = await startFakeStripe({
+  prices: { price_month: { amount: 2500, interval: "month" }, price_year: { amount: 20000, interval: "year" } },
+  webhookSecret: "whsec_partner",
+  deliver: async () => {},
+});
+const fakeAi = await startFakeAnthropic();
+// billing on (Stripe test mode) and sign-ups invite-only, as in production
 const { app, deps, close } = await makeTestApp(
-  { mailer: { enabled: true, send: async (email) => void sent.push(email) } },
-  // the closed beta, as in production: owners get in through the partner's invitation
-  { SIGNUPS: "invite", PARTNERS: `app-builder:${KEY}, other:${OTHER_KEY}`, PARTNER_BETA_DAYS: "30" },
+  { stripe: stripe.client(), ai: aiProvider("anthropic", new Anthropic({ apiKey: "test-key", baseURL: fakeAi.url, maxRetries: 0 })) },
+  {
+    SIGNUPS: "invite",
+    PARTNER_API_KEY: KEY,
+    STRIPE_SECRET_KEY: "sk_test_fake",
+    STRIPE_WEBHOOK_SECRET: "whsec_partner",
+    STRIPE_PRICE_MONTHLY: "price_month",
+    STRIPE_PRICE_YEARLY: "price_year",
+  },
 );
-afterAll(close);
+// another partner on the same database, and a deployment without a partner key
+const other = await makeTestApp({}, { PARTNER_API_KEY: OTHER_KEY, PARTNER_NAME: "otherbuilder" });
+const keyless = await makeTestApp();
+afterAll(async () => {
+  await Promise.all([close(), other.close(), keyless.close()]);
+  await Promise.all([stripe.close(), fakeAi.close()]);
+});
 
-const partner = (path: string, init: { method?: string; json?: unknown } = {}, key = KEY) =>
-  app.request(`/partner/v1${path}`, {
+type App = typeof app;
+const partner = (path: string, init: { method?: string; json?: unknown } = {}, key = KEY, target: App = app) =>
+  target.request(`/partner/v1${path}`, {
     method: init.method ?? "GET",
-    headers: { authorization: `Bearer ${key}`, "content-type": "application/json" },
+    headers: { authorization: `Bearer ${key}`, ...(init.json !== undefined && { "content-type": "application/json" }) },
     ...(init.json !== undefined && { body: JSON.stringify(init.json) }),
   });
-const put = (id: string, json: unknown, key = KEY) => partner(`/apps/${id}`, { method: "PUT", json }, key);
+const id = (prefix: string) => `${prefix}_${randomBytes(6).toString("hex")}`;
 const address = (name: string) => `${name}-${randomBytes(4).toString("hex")}@example.com`;
-const project = () => `proj_${randomBytes(6).toString("hex")}`;
-const signUpAs = (email: string, name = "Olive Owner") =>
-  app.request("/api/auth/sign-up/email", {
+const putWorkspace = (externalId: string, ownerEmail: string, name = "Olive's apps") =>
+  partner(`/workspaces/${externalId}`, { method: "PUT", json: { name, ownerEmail } });
+const putApp = (workspace: string, project: string, json: unknown) => partner(`/workspaces/${workspace}/apps/${project}`, { method: "PUT", json });
+const orgOf = async (externalId: string, name = "appbuilder") =>
+  (await deps.db.select().from(partnerWorkspaces).where(eq(partnerWorkspaces.externalId, externalId))).find((w) => w.partner === name)!;
+
+/** Signs up with an address (sign-ups are invite-only here) and returns a cookie-carrying fetch. */
+async function signUpAs(email: string, name = "Olive Owner") {
+  const res = await app.request("/api/auth/sign-up/email", {
     method: "POST",
     headers: { "content-type": "application/json", origin: ORIGIN },
     body: JSON.stringify({ name, email, password: "correct horse battery" }),
   });
-const cookieOf = (res: Response) => res.headers.getSetCookie().map((c) => c.split(";")[0]).join("; ");
-const asUser = (cookie: string, path: string) => app.request(path, { headers: { cookie, origin: ORIGIN } });
+  const cookie = res.headers.getSetCookie().map((c) => c.split(";")[0]).join("; ");
+  const call = (path: string, init: RequestInit = {}) =>
+    app.request(path, { ...init, headers: { cookie, origin: ORIGIN, "content-type": "application/json", ...(init.headers ?? {}) } });
+  return { res, call };
+}
 
-describe("partner keys", () => {
-  it("are required, and a typo in PARTNERS fails at startup", async () => {
-    expect((await app.request("/partner/v1/apps/x")).status).toBe(401);
-    expect((await partner("/apps/x", {}, "wrong".repeat(10))).status).toBe(401);
-    expect(() => parsePartners("app-builder")).toThrow(/id:key/);
-    expect(() => parsePartners("app-builder:short")).toThrow(/at least 32/);
-    expect(() => parsePartners(`Bad Id:${KEY}`)).toThrow(/slug/);
-    expect(parsePartners(`app-builder:${KEY}`)(KEY)).toEqual({ id: "app-builder", name: "App Builder" });
+const tokenOf = (url: string) => url.split("/claim/")[1]!;
+
+/** A partner workspace whose owner claimed it, with one partner app. */
+async function claimedWorkspace() {
+  const workspace = id("user");
+  const email = address("olive");
+  await putWorkspace(workspace, email);
+  const project = id("proj");
+  const { app: created } = (await (await putApp(workspace, project, { name: "Habit Tracker" })).json()) as any;
+  const { url } = (await (await partner(`/workspaces/${workspace}/claim-link`, { method: "POST" })).json()) as any;
+  const owner = await signUpAs(email);
+  expect(owner.res.status).toBe(200);
+  expect((await owner.call(`/api/partner-claims/${tokenOf(url)}/accept`, { method: "POST" })).status).toBe(200);
+  return { workspace, project, email, owner, publicId: created.appId as string };
+}
+
+describe("keys", () => {
+  it("are required: a missing or wrong key is 401, and without a key configured the routes don't exist", async () => {
+    expect((await app.request("/partner/v1/usage")).status).toBe(401);
+    expect((await partner("/usage", {}, "wrong")).status).toBe(401);
+    expect((await partner("/usage", {}, KEY.slice(0, -1) + "0")).status).toBe(401);
+    expect((await partner("/usage")).status).toBe(200);
+    const res = await partner("/usage", {}, KEY, keyless.app);
+    expect(res.status).toBe(404);
+    expect(((await res.json()) as any).error.code).toBe("not_found");
   });
 });
 
-describe("creating an app for a new owner", () => {
-  it("returns the App ID at once, gives the workspace beta access and invites the owner", async () => {
-    const email = address("olive");
-    const id = project();
-    const res = await put(id, { name: "Habit Tracker", owner: { email: email.toUpperCase(), name: "Olive Owner" }, bundleId: "com.example.habit" });
-    expect(res.status).toBe(201);
-    const body = (await res.json()) as any;
-    expect(body).toMatchObject({
-      externalId: id,
-      app: { name: "Habit Tracker", bundleId: "com.example.habit" },
-      workspace: { name: "Olive's App Builder apps" },
-      owner: { email, status: "invited" },
-      urls: { inbox: `${ORIGIN}/inbox`, signUp: `${ORIGIN}/sign-up?email=${encodeURIComponent(email)}&next=%2Finbox` },
-      apiBaseUrl: "https://api.test",
-      push: { configured: false },
-    });
-    expect(body.app.appId).toMatch(/^app_[0-9A-Za-z]{22}$/);
+describe("workspaces and apps", () => {
+  it("are upserted idempotently, with audit events", async () => {
+    const workspace = id("user");
+    const email = address("ike");
+    const created = await putWorkspace(workspace, email.toUpperCase());
+    expect(created.status).toBe(201);
+    expect(await created.json()).toEqual({ workspace: { externalId: workspace, active: true, aiAllowed: true, claimed: false, dashboardUrl: ORIGIN } });
+    const again = await putWorkspace(workspace, email, "Ike's apps");
+    expect(again.status).toBe(200);
+    const row = await orgOf(workspace);
+    expect(row.ownerEmail).toBe(email);
+    const [org] = await deps.db.select().from(organizations).where(eq(organizations.id, row.organizationId));
+    expect(org!.name).toBe("Ike's apps");
+    expect(await deps.db.select().from(members).where(eq(members.organizationId, row.organizationId))).toHaveLength(0);
 
-    // the SDK works with it straight away
+    const project = id("proj");
+    const first = await putApp(workspace, project, { name: "Habit Tracker", bundleId: "com.example.habit" });
+    expect(first.status).toBe(201);
+    const body = (await first.json()) as any;
+    expect(body.app).toMatchObject({ externalId: project, name: "Habit Tracker" });
+    expect(body.app.appId).toMatch(/^app_[0-9A-Za-z]{22}$/);
+    const renamed = await putApp(workspace, project, { name: "Habit Hero" });
+    expect(renamed.status).toBe(200);
+    expect(await renamed.json()).toEqual({ app: { externalId: project, appId: body.app.appId, name: "Habit Hero" } });
+    // the SDK works with it at once
     const device = await registerDevice(app, body.app.appId);
     expect((await device.send("Hello?")).status).toBe(201);
 
-    const [access] = await deps.db.select().from(betaAccess).where(eq(betaAccess.organizationId, body.workspace.id));
-    expect(access!.note).toBe("partner:app-builder");
-    expect(Math.round((access!.until.getTime() - Date.now()) / 86_400_000)).toBe(30);
-    const [invitation] = await deps.db.select().from(invitations).where(eq(invitations.organizationId, body.workspace.id));
-    expect(invitation).toMatchObject({ email, role: "owner", status: "pending" });
-    const welcome = sent.filter((e) => e.to === email);
-    expect(welcome).toHaveLength(1);
-    expect(welcome[0]!.subject).toContain("Habit Tracker");
-    expect(welcome[0]!.text).toContain(body.urls.signUp);
-    expect(welcome[0]!.text).toContain("App Builder");
+    const audit = await deps.db.select().from(auditEvents).where(eq(auditEvents.organizationId, row.organizationId));
+    expect(audit.map((a) => a.action).sort()).toEqual(["partner.app.created", "partner.workspace.created"]);
+
+    // deleting is idempotent, and the project then gets a new app
+    expect((await partner(`/workspaces/${workspace}/apps/${project}`, { method: "DELETE" })).status).toBe(204);
+    expect((await partner(`/workspaces/${workspace}/apps/${project}`, { method: "DELETE" })).status).toBe(204);
+    expect((await device.send("Still there?")).status).toBe(401);
+    const recreated = (await (await putApp(workspace, project, { name: "Habit Hero" })).json()) as any;
+    expect(recreated.app.appId).not.toBe(body.app.appId);
+
+    expect((await putApp(id("nobody"), id("proj"), { name: "X" })).status).toBe(404);
+    expect((await putWorkspace("has space", email)).status).toBe(400);
+    expect((await putWorkspace(id("user"), "not-an-email")).status).toBe(400);
   });
 
-  it("is idempotent, keeps one owner's apps in one workspace, and keeps partners apart", async () => {
-    const email = address("ike");
-    const id = project();
-    const first = (await (await put(id, { name: "One", owner: { email } })).json()) as any;
-    const again = await put(id, { name: "One", owner: { email } });
-    expect(again.status).toBe(200);
-    expect(((await again.json()) as any).app.appId).toBe(first.app.appId);
-    const second = (await (await put(project(), { name: "Two", owner: { email } })).json()) as any;
-    expect(second.workspace.id).toBe(first.workspace.id);
-    expect(second.app.appId).not.toBe(first.app.appId);
-    expect(sent.filter((e) => e.to === email)).toHaveLength(1);
-
-    expect((await put(id, { name: "One", owner: { email: address("someone") } })).status).toBe(409);
-    expect((await partner(`/apps/${id}`, {}, OTHER_KEY)).status).toBe(404);
-    expect((await put(id, { name: "Theirs", owner: { email } }, OTHER_KEY)).status).toBe(201);
-  });
-
-  it("validates the project ID and the owner", async () => {
-    expect((await put("has space", { name: "X", owner: { email: address("v") } })).status).toBe(400);
-    expect((await put(project(), { name: "X", owner: { email: "not-an-email" } })).status).toBe(400);
-    expect((await put(project(), { name: "", owner: { email: address("v") } })).status).toBe(400);
-  });
-});
-
-describe("the owner joining", () => {
-  it("signs up with the invited address (sign-ups closed) straight into the workspace, as its owner", async () => {
-    const email = address("olga");
-    const id = project();
-    const created = (await (await put(id, { name: "Plant Pal", owner: { email, name: "Olga" } })).json()) as any;
-
-    const res = await signUpAs(email, "Olga Owner");
-    expect(res.status).toBe(200);
-    const cookie = cookieOf(res);
-    const me = (await (await asUser(cookie, "/api/me")).json()) as any;
-    expect(me.organization.id).toBe(created.workspace.id);
-    // no empty workspace of their own next to it
-    const memberships = await deps.db.select().from(members).where(eq(members.userId, me.user.id));
-    expect(memberships.map((m) => [m.organizationId, m.role])).toEqual([[created.workspace.id, "owner"]]);
-    const appsRes = (await (await asUser(cookie, "/api/apps")).json()) as any;
-    expect(appsRes.apps.map((a: any) => a.publicId)).toEqual([created.app.appId]);
-    expect(await deps.billing.isActive(created.workspace.id)).toBe(true);
-
-    const now = (await (await partner(`/apps/${id}`)).json()) as any;
-    expect(now.owner).toMatchObject({ status: "member", invitationExpiresAt: null });
-    expect(now.urls.signUp).toBeNull();
-    const audit = await deps.db.select().from(auditEvents).where(eq(auditEvents.organizationId, created.workspace.id));
-    expect(audit.map((a) => a.action).sort()).toEqual(["member.added", "partner.app_created"]);
-  });
-
-  it("adds an owner who already has an account at once, and tells them where to sign in", async () => {
-    const email = address("ezra");
-    await deps.db.insert(betaInvites).values({ email, until: new Date(Date.now() + 86_400_000) });
-    expect((await signUpAs(email, "Ezra Existing")).status).toBe(200);
-    const res = (await (await put(project(), { name: "Recipe Box", owner: { email } })).json()) as any;
-    expect(res.owner.status).toBe("member");
-    const welcome = sent.filter((e) => e.to === email);
-    expect(welcome).toHaveLength(1);
-    expect(welcome[0]!.text).toContain("/sign-in?next=%2Finbox");
-  });
-
-  it("renews an expired invitation on the next PUT", async () => {
-    const email = address("eve");
-    const id = project();
-    const created = (await (await put(id, { name: "Late", owner: { email } })).json()) as any;
-    await deps.db.update(invitations).set({ expiresAt: new Date(Date.now() - 1000) }).where(eq(invitations.organizationId, created.workspace.id));
-    expect(((await (await partner(`/apps/${id}`)).json()) as any).owner.status).toBe("expired");
-    // an expired invitation doesn't open sign-up
-    expect((await signUpAs(email)).status).toBe(403);
-    const renewed = (await (await put(id, { name: "Late", owner: { email } })).json()) as any;
-    expect(renewed.owner.status).toBe("invited");
-    expect(sent.filter((e) => e.to === email)).toHaveLength(2);
-    expect((await signUpAs(email)).status).toBe(200);
-  });
-});
-
-describe("push and deletion", () => {
-  it("takes the APNs key, never returning it", async () => {
-    const id = project();
-    await put(id, { name: "Pushy", owner: { email: address("pat") } });
-    const key = generateP8();
-    const res = await partner(`/apps/${id}/push`, { method: "PUT", json: { teamId: "TEAM123456", keyId: "KEY1234567", bundleId: "com.example.pushy", p8: key.p8 } });
-    expect(res.status).toBe(200);
-    const body = (await res.json()) as any;
-    expect(body.push).toEqual({ configured: true, bundleId: "com.example.pushy", issue: null });
-    expect(JSON.stringify(body)).not.toContain("PRIVATE KEY");
-    const bad = await partner(`/apps/${id}/push`, { method: "PUT", json: { teamId: "TEAM123456", keyId: "KEY1234567", bundleId: "com.example.pushy", p8: "nope" } });
-    expect(((await bad.json()) as any).error.code).toBe("invalid_push_key");
-    expect((await partner(`/apps/${project()}/push`, { method: "PUT", json: { teamId: "TEAM123456", keyId: "KEY1234567", bundleId: "a.b" } })).status).toBe(404);
-  });
-
-  it("deletes the app; the project ID then makes a new one", async () => {
-    const email = address("dan");
-    const id = project();
-    const created = (await (await put(id, { name: "Gone", owner: { email } })).json()) as any;
-    expect((await partner(`/apps/${id}`, { method: "DELETE" })).status).toBe(204);
-    expect((await partner(`/apps/${id}`)).status).toBe(404);
-    const res = await app.request("/v1/devices", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ appId: created.app.appId, device: { model: "iPhone16,1" } }),
+  it("can add apps and reply without a Stripe subscription, and say so on the billing page", async () => {
+    const { owner, publicId } = await claimedWorkspace();
+    // a second app needs a subscription in an ordinary workspace
+    for (const name of ["Second", "Third"]) {
+      expect((await owner.call("/api/apps", { method: "POST", body: JSON.stringify({ name }) })).status).toBe(201);
+    }
+    const device = await registerDevice(app, publicId);
+    const sent = (await (await device.send("Help")).json()) as any;
+    expect((await reply(owner.call, sent.conversation.id, "Here to help")).status).toBe(201);
+    expect(await (await owner.call("/api/billing")).json()).toMatchObject({
+      enabled: true,
+      active: true,
+      offer: null,
+      subscription: null,
+      partner: { name: "App Builder", active: true },
     });
-    expect(res.status).toBe(404);
-    const again = (await (await put(id, { name: "Back", owner: { email } })).json()) as any;
-    expect(again.app.appId).not.toBe(created.app.appId);
-    expect(again.workspace.id).toBe(created.workspace.id);
-    const links = await deps.db.select().from(partnerApps).where(and(eq(partnerApps.partner, "app-builder"), eq(partnerApps.externalId, id)));
-    expect(links).toHaveLength(1);
+  });
+
+  it("locks replies like an unpaid workspace when the partner marks it inactive", async () => {
+    const { workspace, owner, publicId } = await claimedWorkspace();
+    // the app's first conversation is its setup conversation, which stays open; use a second person's
+    await (await registerDevice(app, publicId)).send("setup test");
+    const sent = (await (await (await registerDevice(app, publicId)).send("Hi")).json()) as any;
+
+    const off = await partner(`/workspaces/${workspace}`, { method: "PATCH", json: { active: false } });
+    expect(((await off.json()) as any).workspace).toMatchObject({ active: false, claimed: true });
+    const locked = await reply(owner.call, sent.conversation.id, "Hello");
+    expect(locked.status).toBe(402);
+    expect(((await locked.json()) as any).error.code).toBe("subscription_inactive");
+    expect(await (await owner.call("/api/billing")).json()).toMatchObject({ active: false, partner: { active: false } });
+
+    await partner(`/workspaces/${workspace}`, { method: "PATCH", json: { active: true } });
+    expect((await reply(owner.call, sent.conversation.id, "Hello again")).status).toBe(201);
+  });
+
+  it("stops AI replies when the partner turns them off; the team still gets the message", async () => {
+    const { workspace, owner, publicId } = await claimedWorkspace();
+    const appRow = (await (await owner.call("/api/apps")).json()) as any;
+    const appId = appRow.apps.find((a: any) => a.publicId === publicId).id;
+    const settings = { enabled: true, name: "Assistant", instructions: "", docs: "Help.", allowOffers: false, allowReviews: false };
+    expect((await owner.call(`/api/apps/${appId}/ai`, { method: "PUT", body: JSON.stringify(settings) })).status).toBe(200);
+    const device = await registerDevice(app, publicId);
+    expect((await device.sdk("/v1/ai-consent", { json: { consent: "granted" } })).status).toBe(200);
+
+    await partner(`/workspaces/${workspace}`, { method: "PATCH", json: { aiAllowed: false } });
+    const sent = (await (await device.send("How do I start?")).json()) as any;
+    const job = { conversationId: sent.conversation.id, messageId: sent.message.id };
+    const before = fakeAi.requests.length;
+    expect(await considerMessage(deps, job)).toBe("disabled");
+    expect(fakeAi.requests.length).toBe(before);
+    expect(((await (await device.sdk("/v1/conversation")).json()) as any).ai.enabled).toBe(false);
+    const inbox = (await (await owner.call(`/api/conversations/${sent.conversation.id}`)).json()) as any;
+    expect(inbox.conversation.unreadForTeam).toBe(1);
+
+    await partner(`/workspaces/${workspace}`, { method: "PATCH", json: { aiAllowed: true } });
+    fakeAi.respond(() => toolUse("reply", { text: "Tap Start." }));
+    expect(await considerMessage(deps, job)).toBe("replied");
+  });
+});
+
+describe("usage", () => {
+  it("lists the partner's AI runs that called the model, priced, a page at a time", async () => {
+    const { workspace, project, publicId } = await claimedWorkspace();
+    const sent = (await (await (await registerDevice(app, publicId)).send("Hi")).json()) as any;
+    const [appRow] = await deps.db.select({ id: apps.id }).from(apps).where(eq(apps.publicId, publicId));
+    // earlier tests' runs come before this cursor (ids are time-ordered)
+    const start = uuidv7();
+    const ids: string[] = [];
+    const run = async (tokens: Partial<Record<"inputTokens" | "outputTokens" | "cacheReadTokens" | "cacheWriteTokens", number>>, model: string | null = null) => {
+      const runId = uuidv7();
+      await deps.db.insert(aiRuns).values({ id: runId, appId: appRow!.id, conversationId: sent.conversation.id, outcome: "replied", model, ...tokens });
+      ids.push(runId);
+    };
+    await run({ inputTokens: 1_000_000, outputTokens: 100_000, cacheReadTokens: 1_000_000, cacheWriteTokens: 200_000 });
+    await run({ outputTokens: 50_000 }, "anthropic/claude-opus-5.5");
+    await run({}); // never called the model: left out
+    await run({ inputTokens: 2_500 }, "claude-opus-5-5");
+
+    const items: any[] = [];
+    let after: string | null = start;
+    for (let page = 0; page < 10 && after; page++) {
+      const res = (await (await partner(`/usage?limit=2&after=${after}`)).json()) as any;
+      expect(res.items.length).toBeLessThanOrEqual(2);
+      items.push(...res.items);
+      after = res.next;
+    }
+    expect(items.map((i) => i.id)).toEqual([ids[0], ids[1], ids[3]]);
+    // $4 / $20 / $0.20 / $5 per million input, output, cache-read and cache-write tokens
+    expect(items.map((i) => i.costUsd)).toEqual([7.2, 1, 0.01]);
+    expect(items[0]).toMatchObject({ workspaceExternalId: workspace, appExternalId: project });
+    expect(Date.now() - new Date(items[0].createdAt).getTime()).toBeLessThan(60_000);
+    expect(await (await partner(`/usage?after=${ids[3]}`)).json()).toEqual({ items: [], next: null });
+    expect((await partner("/usage?limit=501")).status).toBe(400);
+    // the other partner doesn't see them
+    const theirs = (await (await partner(`/usage?limit=500&after=${start}`, {}, OTHER_KEY, other.app)).json()) as any;
+    expect(theirs.items).toEqual([]);
+  });
+});
+
+describe("claiming", () => {
+  it("lets the owner sign up with the link while sign-ups are closed, and join as owner without a workspace of their own", async () => {
+    const workspace = id("user");
+    const email = address("cleo");
+    await putWorkspace(workspace, email, "Cleo's apps");
+    // no claim yet: sign-ups are closed to this address
+    expect((await signUpAs(email)).res.status).toBe(403);
+    const { url } = (await (await partner(`/workspaces/${workspace}/claim-link`, { method: "POST" })).json()) as any;
+    expect(url).toMatch(new RegExp(`^${ORIGIN}/claim/[A-Za-z0-9_-]{43}$`));
+    const token = tokenOf(url);
+    expect(await (await app.request(`/api/partner-claims/${token}`)).json()).toEqual({
+      email,
+      workspaceName: "Cleo's apps",
+      partnerName: "App Builder",
+      status: "valid",
+    });
+
+    const owner = await signUpAs(email, "Cleo Owner");
+    expect(owner.res.status).toBe(200);
+    // no empty workspace of their own: the claim is where they belong
+    const joined = await deps.db.select().from(members).innerJoin(users, eq(users.id, members.userId)).where(eq(users.email, email));
+    expect(joined).toHaveLength(0);
+
+    // someone else can't use it
+    const strangerEmail = address("stranger");
+    await deps.db.insert(betaInvites).values({ email: strangerEmail, until: new Date(Date.now() + 86_400_000) });
+    const stranger = await signUpAs(strangerEmail, "Stan Stranger");
+    expect((await stranger.call(`/api/partner-claims/${token}/accept`, { method: "POST" })).status).toBe(403);
+
+    const accepted = await owner.call(`/api/partner-claims/${token}/accept`, { method: "POST" });
+    expect(accepted.status).toBe(200);
+    const { organizationId } = (await accepted.json()) as any;
+    expect(organizationId).toBe((await orgOf(workspace)).organizationId);
+    const after = (await (await owner.call("/api/me")).json()) as any;
+    expect(after.organization.id).toBe(organizationId);
+    const memberships = await deps.db.select().from(members).where(eq(members.organizationId, organizationId));
+    expect(memberships.map((m) => m.role)).toEqual(["owner"]);
+
+    // the link is spent; the partner now gets the dashboard instead of a link
+    expect((await owner.call(`/api/partner-claims/${token}/accept`, { method: "POST" })).status).toBe(403);
+    expect(((await (await app.request(`/api/partner-claims/${token}`)).json()) as any).status).toBe("used");
+    expect(await (await partner(`/workspaces/${workspace}/claim-link`, { method: "POST" })).json()).toEqual({ url: ORIGIN });
+    expect(((await (await putWorkspace(workspace, email, "Cleo's apps")).json()) as any).workspace.claimed).toBe(true);
+  });
+
+  it("refuses an expired link", async () => {
+    const workspace = id("user");
+    const email = address("ed");
+    await putWorkspace(workspace, email);
+    const { url } = (await (await partner(`/workspaces/${workspace}/claim-link`, { method: "POST" })).json()) as any;
+    await deps.db.update(partnerClaims).set({ expiresAt: new Date(Date.now() - 1000) }).where(eq(partnerClaims.email, email));
+    expect(((await (await app.request(`/api/partner-claims/${tokenOf(url)}`)).json()) as any).status).toBe("expired");
+    expect((await signUpAs(email)).res.status).toBe(403);
+    expect((await app.request("/api/partner-claims/not-a-real-token-at-all-xx")).status).toBe(404);
+  });
+});
+
+describe("partners", () => {
+  it("can't touch each other's workspaces", async () => {
+    const workspace = id("user");
+    await putWorkspace(workspace, address("pia"));
+    const theirs = { method: "PATCH", json: { active: false } };
+    expect((await partner(`/workspaces/${workspace}`, theirs, OTHER_KEY, other.app)).status).toBe(404);
+    expect((await partner(`/workspaces/${workspace}/apps/${id("proj")}`, { method: "PUT", json: { name: "X" } }, OTHER_KEY, other.app)).status).toBe(404);
+    expect((await partner(`/workspaces/${workspace}/claim-link`, { method: "POST" }, OTHER_KEY, other.app)).status).toBe(404);
+    // the same id is a different workspace for them
+    const same = await partner(`/workspaces/${workspace}`, { method: "PUT", json: { name: "Theirs", ownerEmail: address("pia") } }, OTHER_KEY, other.app);
+    expect(same.status).toBe(201);
+    expect((await orgOf(workspace)).active).toBe(true);
+    expect((await orgOf(workspace, "otherbuilder")).organizationId).not.toBe((await orgOf(workspace)).organizationId);
   });
 });

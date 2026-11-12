@@ -32,6 +32,11 @@ export const BillingState = z.object({
   offer: BillingOffer.nullable(),
   /** Free access in the closed beta, until a date; the workspace counts as subscribed meanwhile. */
   beta: z.object({ until: z.string() }).nullable(),
+  /**
+   * A workspace a partner created (App Builder): included with the owner's plan there, so no Checkout. `active`
+   * follows that plan.
+   */
+  partner: z.object({ name: z.string(), active: z.boolean() }).nullable(),
   /** Owners and admins start and manage the subscription. */
   canManage: z.boolean(),
 });

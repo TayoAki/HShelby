@@ -78,6 +78,14 @@ export function BillingBanner({ billing }: { billing: BillingState | null }) {
   if (!billing?.enabled) return null;
   const pastDue = billing.subscription?.status === "past_due";
   if (billing.active && !pastDue) return null;
+  if (billing.partner) {
+    return (
+      <p role="status" className="border-b border-line bg-[#fff8e6] px-5 py-2.5 text-[14px]">
+        Your {billing.partner.name} plan has ended, so replies are paused. Users can still write in and nothing is lost; renew in{" "}
+        {billing.partner.name} to reply again.
+      </p>
+    );
+  }
   return (
     <p role="status" className="border-b border-line bg-[#fff8e6] px-5 py-2.5 text-[14px]">
       {pastDue

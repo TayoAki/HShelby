@@ -101,6 +101,7 @@ describe("without a subscription", () => {
         founder: { claimed: 0, total: 3, nextMonthly: { amount: 5000, currency: "usd" } },
       },
       beta: null,
+      partner: null,
       canManage: true,
     });
     const pricing = await app.request("/public/pricing");
@@ -256,7 +257,7 @@ describe("with billing switched off", () => {
     const plain = await makeTestApp();
     try {
       const team = await workspaceWithApp(plain.app);
-      expect(await (await team.call("/api/billing")).json()).toEqual({ enabled: false, active: true, subscription: null, offer: null, beta: null, canManage: true });
+      expect(await (await team.call("/api/billing")).json()).toEqual({ enabled: false, active: true, subscription: null, offer: null, beta: null, partner: null, canManage: true });
       expect((await team.call("/api/apps", { method: "POST", body: JSON.stringify({ name: "Second app" }) })).status).toBe(201);
       expect(await (await plain.app.request("/public/pricing")).json()).toEqual({ enabled: false, offer: null });
     } finally {

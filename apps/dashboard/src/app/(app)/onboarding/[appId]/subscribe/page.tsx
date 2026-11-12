@@ -26,13 +26,19 @@ export default function SubscribePage() {
         </div>
       )}
 
-      {billing?.enabled && billing.active && (
+      {billing?.partner && (
+        <div className="mt-10 rounded-3xl bg-white p-6 text-[15px] shadow-[0_0_0_1px_var(--line)]">
+          Included with {billing.partner.name}: nothing to pay here.
+        </div>
+      )}
+
+      {!billing?.partner && billing?.enabled && billing.active && (
         <div className="mt-10 rounded-3xl bg-white p-6 text-[15px] shadow-[0_0_0_1px_var(--line)]">
           You&apos;re subscribed{billing.subscription?.cancelAtPeriodEnd ? " until the end of this period" : ""}.
         </div>
       )}
 
-      {billing?.enabled && !billing.active && billing.offer && me?.organization && (
+      {!billing?.partner && billing?.enabled && !billing.active && billing.offer && me?.organization && (
         <div className="mt-10">
           <SubscribeForm offer={billing.offer} organizationId={me.organization.id} canManage={billing.canManage} returnPath="/billing" />
         </div>

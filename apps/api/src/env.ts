@@ -68,12 +68,15 @@ const EnvSchema = z.object({
    */
   SIGNUPS: z.enum(["open", "invite"]).default("open"),
   /**
-   * Partners allowed to use the partner API (src/routes/partner.ts), comma separated, each `id:key` with a slug
-   * id (`app-builder`) and a random key of at least 32 characters (`openssl rand -hex 32`). Unset: no partner API.
+   * The partner API's key (src/routes/partner.ts): App Builder sends it as a bearer token. At least 32 characters;
+   * unset turns the partner API off (its routes answer 404).
    */
-  PARTNERS: optional,
-  /** How long a workspace a partner creates counts as subscribed (beta access), in days. */
-  PARTNER_BETA_DAYS: z.coerce.number().int().min(1).default(90),
+  PARTNER_API_KEY: optional.refine((v) => v === undefined || v.length >= 32, "PARTNER_API_KEY must be at least 32 characters"),
+  /** The partner the key belongs to; its workspaces are the only ones the partner API touches. */
+  PARTNER_NAME: z
+    .string()
+    .regex(/^[a-z0-9-]{2,40}$/, "PARTNER_NAME: lowercase letters, digits and dashes")
+    .default("appbuilder"),
   /** Multiplies every rate limit (src/rate-limit.ts); 0 turns them off. */
   RATE_LIMIT_SCALE: z.coerce.number().min(0).default(1),
 });

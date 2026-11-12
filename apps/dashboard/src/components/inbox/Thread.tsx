@@ -500,10 +500,19 @@ export function Thread({ conversationId }: { conversationId: string }) {
         {replyLocked ? (
           <div className="px-5 pb-4">
             <div className="rounded-[24px] bg-panel px-5 py-4 text-[14px]">
-              <p>Subscribe to reply. {deviceLabel(device)} can still write in, and nothing is lost.</p>
-              <Link href="/billing" className="mt-2 inline-block underline underline-offset-2">
-                Subscribe
-              </Link>
+              {billing?.partner ? (
+                <p>
+                  Your {billing.partner.name} plan has ended, so replies are paused. {deviceLabel(device)} can still write in, and nothing is
+                  lost; renew in {billing.partner.name} to reply.
+                </p>
+              ) : (
+                <>
+                  <p>Subscribe to reply. {deviceLabel(device)} can still write in, and nothing is lost.</p>
+                  <Link href="/billing" className="mt-2 inline-block underline underline-offset-2">
+                    Subscribe
+                  </Link>
+                </>
+              )}
             </div>
           </div>
         ) : (

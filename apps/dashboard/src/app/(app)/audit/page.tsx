@@ -9,13 +9,15 @@ import { api } from "@/lib/api";
 import { relativeTime } from "@/lib/time";
 
 const str = (v: unknown) => (typeof v === "string" || typeof v === "number" ? String(v) : "");
-/** A partner's id as its name: "app-builder" → "App Builder". */
+/** A partner's id as its name: "appbuilder" → "App Builder". */
 const partnerLabel = (id: string) =>
-  id
-    .split("-")
-    .filter(Boolean)
-    .map((w) => w[0]!.toUpperCase() + w.slice(1))
-    .join(" ") || "A partner";
+  id === "appbuilder"
+    ? "App Builder"
+    : id
+        .split("-")
+        .filter(Boolean)
+        .map((w) => w[0]!.toUpperCase() + w.slice(1))
+        .join(" ") || "A partner";
 
 /** What an event says, in words. Unknown actions show as they're stored. */
 function describe(e: AuditEvent) {
@@ -24,7 +26,9 @@ function describe(e: AuditEvent) {
   const provider = (PROVIDER_NAMES as Record<string, string>)[str(m.provider) as Provider] ?? str(m.provider);
   const lines: Record<string, string> = {
     "app.deleted": `Deleted ${target}`,
-    "partner.app_created": `${partnerLabel(str(m.partner))} added ${target}`,
+    "partner.app.created": `${partnerLabel(str(m.partner))} added ${target}`,
+    "partner.workspace.created": `${partnerLabel(str(m.partner))} created this workspace`,
+    "partner.workspace.updated": `${partnerLabel(str(m.partner))} updated this workspace${m.active === false ? ": plan inactive" : m.active === true ? ": plan active" : m.aiAllowed === false ? ": AI replies off" : m.aiAllowed === true ? ": AI replies on" : ""}`,
     "app.app_store_id.changed": `Changed ${target}'s App Store ID${m.to ? ` to ${str(m.to)}` : ""}`,
     "app.only_verified.enabled": `Turned on “only verified users can chat” for ${target}`,
     "app.only_verified.disabled": `Turned off “only verified users can chat” for ${target}`,

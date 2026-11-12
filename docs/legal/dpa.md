@@ -290,6 +290,8 @@ This list mirrors our internal subprocessor register. We update it before any da
 
 Resend and Stripe process data Hire Shelby controls (account and billing data) rather than End Users' data; they're listed for completeness.
 
+**Partners.** For a workspace created through a partner (App Builder), the partner receives the workspace's and its apps' state (identifiers, whether it's active, whether AI Replies are allowed, whether it's been joined) and the cost of each AI Reply, so it can bill the Customer. It never receives messages, photos or other End User data.
+
 **Services the Customer connects.** Not our Subprocessors: the Customer chooses them, and data flows through them on its instruction once it sets them up (section 4.5).
 
 | Service | When | Data |
