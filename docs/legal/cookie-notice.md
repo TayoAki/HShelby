@@ -4,7 +4,7 @@ Effective date: [EFFECTIVE DATE]
 
 # Cookie notice
 
-This notice explains the cookies and similar technologies used on hireshelby.com and in the Hire Shelby dashboard at app.hireshelby.com, operated by [COMPANY LEGAL NAME], doing business as Hire Shelby.
+This notice explains the cookies and similar technologies used on hireshelby.com and in the Hire Shelby dashboard at app.hireshelby.com, operated by HireShelby.
 
 **In short: we use one cookie, only to keep you signed in to the dashboard. We use no analytics, advertising or tracking cookies, so we don't need to ask for your consent and there's no cookie banner.**
 

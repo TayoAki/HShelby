@@ -4,7 +4,7 @@ Effective date: [EFFECTIVE DATE]
 
 # Data Processing Addendum
 
-This Data Processing Addendum ("DPA") is part of the agreement between [COMPANY LEGAL NAME], doing business as Hire Shelby ("Hire Shelby", "we"), and the Customer under our [Terms of Service](./terms-of-service.md) (the "Agreement"). It applies whenever we process Customer Personal Data to provide the Service, and the Customer accepts it by accepting the Agreement. A Customer that wants a countersigned copy can ask at legal@hireshelby.com.
+This Data Processing Addendum ("DPA") is part of the agreement between HireShelby ("Hire Shelby", "we") and the Customer under our [Terms of Service](./terms-of-service.md) (the "Agreement"). It applies whenever we process Customer Personal Data to provide the Service, and the Customer accepts it by accepting the Agreement. A Customer that wants a countersigned copy can ask at legal@hireshelby.com.
 
 Capitalised terms not defined here have the meaning given in the Terms of Service.
 
@@ -28,7 +28,7 @@ Capitalised terms not defined here have the meaning given in the Terms of Servic
 
 The Customer:
 
-1. ensures it has a lawful basis for the processing it instructs, and gives End Users the notices and obtains the consents Data Protection Laws (and Apple's rules) require, including about AI Replies, push notifications and any Telegram group it connects;
+1. ensures it has a lawful basis for the processing it instructs, and gives End Users the notices and obtains the consents Data Protection Laws (and Apple's rules) require, including about AI Replies, push notifications and any Telegram group it connects (the SDK asks each End User before AI Replies answer them; the Customer reports End Users' opt-in to promotional notifications only when they gave it);
 2. ensures its instructions comply with Data Protection Laws;
 3. doesn't use the Service to collect special categories of personal data, data about criminal convictions, government ID numbers, payment card numbers or passwords (see [Annex I](#annex-i-description-of-the-processing), section B.3, and the [Acceptable Use Policy](./acceptable-use-policy.md));
 4. is responsible for its own configuration: who has admin roles, keeping its identity secret on its server, using identity verification where its app has sign-in, and its connections to third-party services; and
@@ -147,7 +147,7 @@ Contact for this DPA: privacy@hireshelby.com
 
 **Data exporter**: the Customer, as identified in its workspace and billing details. Contact: the workspace's owners. Role: controller (Module 2) or processor (Module 3). Activities: using the Service to run an in-app support chat for its iOS apps. Signature and date: by accepting the Agreement.
 
-**Data importer**: [COMPANY LEGAL NAME], doing business as Hire Shelby, [COMPANY ADDRESS]. Contact: privacy@hireshelby.com. EU representative: [EU REPRESENTATIVE, if required]. UK representative: [UK REPRESENTATIVE, if required]. Role: processor (Module 2) or subprocessor (Module 3). Activities: providing the Service. Signature and date: by accepting the Agreement.
+**Data importer**: HireShelby, [COMPANY ADDRESS]. Contact: privacy@hireshelby.com. EU representative: [EU REPRESENTATIVE, if required]. UK representative: [UK REPRESENTATIVE, if required]. Role: processor (Module 2) or subprocessor (Module 3). Activities: providing the Service. Signature and date: by accepting the Agreement.
 
 ### B. Description of the processing and transfer
 
@@ -252,6 +252,7 @@ The technical and organisational measures we apply to Customer Personal Data. Ou
 
 **AI Replies**
 - Off by default, turned on per app by an admin.
+- Even then, the chat asks each End User first, naming the AI providers; nothing of an End User's reaches the AI until they allow it, and they can turn it off in the chat at any time. The choice and its time are recorded.
 - Requests go to Anthropic's Claude, through OpenRouter pinned to Anthropic with no fallback to other providers and data collection denied, or directly to Anthropic.
 - Each turn sends only the data listed in Annex I, section B.5. The model's actions are limited to four tools, and guardrails in code check them: offers only for paywalls the device reported, limits on rating requests, a block on promising refunds, at most one message per turn, and no reply once a teammate has answered. The AI is instructed never to claim to be human and to say it's an AI assistant when asked.
 

@@ -4,7 +4,7 @@ Effective date: [EFFECTIVE DATE]
 
 # Privacy policy
 
-This policy explains how [COMPANY LEGAL NAME], doing business as Hire Shelby ("Hire Shelby", "we", "us"), handles personal data when you visit hireshelby.com, sign up for or use the dashboard at app.hireshelby.com, or contact us.
+This policy explains how HireShelby ("Hire Shelby", "we", "us") handles personal data when you visit hireshelby.com, sign up for or use the dashboard at app.hireshelby.com, or contact us.
 
 Hire Shelby gives iOS app developers an in-app support chat. Our customers ("Customers") are businesses and developers who add our SDK to their apps. The people who use those apps ("app users") can write to the Customer's team from inside the app, and the team answers from our dashboard, from its own Telegram group, or with AI replies.
 
@@ -20,7 +20,7 @@ Hire Shelby gives iOS app developers an in-app support chat. Our customers ("Cus
 
 For the personal data described in this policy (accounts, workspaces, billing, website and dashboard visitors, and messages you send us), Hire Shelby is the controller:
 
-[COMPANY LEGAL NAME], doing business as Hire Shelby, incorporated in [JURISDICTION OF INCORPORATION]
+HireShelby, incorporated in [JURISDICTION OF INCORPORATION]
 [COMPANY ADDRESS]
 Privacy questions and requests: privacy@hireshelby.com
 
@@ -171,6 +171,6 @@ We'll update this policy when our practices change and change the effective date
 Privacy questions and requests: privacy@hireshelby.com
 Security reports: security@hireshelby.com
 Everything else: support@hireshelby.com
-Post: [COMPANY LEGAL NAME], [COMPANY ADDRESS]
+Post: HireShelby, [COMPANY ADDRESS]
 
 Related documents: [Terms of Service](./terms-of-service.md) · [Data Processing Addendum](./dpa.md) · [Cookie notice](./cookie-notice.md) · [Security](./security.md) · [Acceptable use policy](./acceptable-use-policy.md)

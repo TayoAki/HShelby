@@ -24,7 +24,6 @@ Drafts of Hire Shelby's public legal documents. They describe the service as bui
 | Placeholder | What goes there |
 |---|---|
 | `[EFFECTIVE DATE]` | The date each document takes effect (the same date across the set when first published). |
-| `[COMPANY LEGAL NAME]` | The contracting entity's registered name. The documents say "doing business as Hire Shelby". |
 | `[COMPANY ADDRESS]` | Registered postal address. |
 | `[JURISDICTION OF INCORPORATION]` | Where the entity is incorporated. |
 | `[GOVERNING LAW]` | Law governing the Terms (and the DPA, except the SCCs). |
@@ -36,6 +35,8 @@ Drafts of Hire Shelby's public legal documents. They describe the service as bui
 | `[MINIMUM LIABILITY CAP]` | The floor of the Terms' liability cap (matters during the free beta, when no fees are paid). |
 | `[SUBPROCESSOR LIST URL]` | Where the subprocessor list is published (Annex III of the DPA on hireshelby.com), for the end-user template. |
 
+The contracting entity is named **HireShelby** throughout; the product is "Hire Shelby". If the registered name carries a suffix (LLC, Inc., Ltd), add it wherever HireShelby names the entity (the opening of each document, the DPA's data importer and the contact addresses).
+
 Fields in curly braces (`{App name}`) in the end-user template are for Customers to fill in, not us.
 
 Mailboxes used: privacy@hireshelby.com, legal@hireshelby.com, security@hireshelby.com, support@hireshelby.com. No personal addresses.
@@ -45,7 +46,7 @@ Mailboxes used: privacy@hireshelby.com, legal@hireshelby.com, security@hireshelb
 **Legal**
 
 - [ ] Counsel reviews every document, in particular: the liability cap and indemnities (the Terms give an IP indemnity for paid subscriptions only), the SCC clause choices and whether the entity's location changes them (an EEA-based entity doesn't need Module 2 for its own import), US state law thresholds, the AI Act and Apple's third-party-AI consent rule as they apply to AI Replies, the kids'-apps restriction, and the click-through: sign-up says "By creating an account you agree to…"; decide whether that's enough or a checkbox is needed, and link the DPA and AUP from it too.
-- [ ] Entity details filled in: legal name, address, jurisdiction, governing law, venue, SCC Member State, representatives (or lines removed).
+- [ ] Entity details filled in: address, jurisdiction, governing law, venue, SCC Member State, representatives (or lines removed); the legal name is HireShelby (add its suffix if it has one).
 - [ ] Signed DPAs (with SCCs where needed) in place with Railway, OpenRouter, Anthropic, Resend and Stripe, and their terms checked against what the documents say (no training on our data; OpenRouter's "deny data collection" routing).
 
 **Operations**

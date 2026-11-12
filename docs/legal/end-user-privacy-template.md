@@ -12,7 +12,7 @@ A template Hire Shelby Customers can adapt for their own app's privacy policy, d
 2. Replace every `{…}` field with your details. (The `[…]` placeholders are ours, and we fill them in before publishing this template.)
 3. Delete the optional sections you don't use: they're marked *Optional*. Keep the rest.
 4. Make your App Store privacy answers match: see the [App Store privacy guide](./app-store-privacy-guide.md).
-5. If you turn on AI Replies, Apple's App Review Guidelines require you to disclose that personal data is shared with a third-party AI and to get the person's explicit permission first. This text covers the disclosure; you still need the permission step in your app.
+5. If you turn on AI Replies, Apple's App Review Guidelines require you to disclose that personal data is shared with a third-party AI and to get the person's explicit permission first. This text covers the disclosure, and the chat asks for the permission itself, naming the providers, before any message goes to the AI. Never turn it on for someone.
 6. Make deletion real: when someone deletes their account in your app, call the SDK's delete function. It deletes the chat data for that install. If the person also used the chat on another device, or signed out and back in, find their other conversations in the dashboard (search by user ID or email) and delete those too. If you connected a subscription provider, the subscription events that name the person's user ID stay until the app is deleted; ask support@hireshelby.com to delete them.
 
 ## Text to paste
@@ -40,11 +40,11 @@ To answer your questions, show you the conversation, notify you of replies, keep
 
 **AI replies** *(Optional, if you turn on AI Replies)*
 
-Some replies may be written by an AI assistant, {assistant name}, using Anthropic's Claude model, accessed through OpenRouter. To answer you, the assistant receives our help articles and instructions, the latest messages in your conversation (up to 30; photos aren't included), and a few details: your name and email address if we have them, your language, local time, app and iOS version, device model, subscription status and the offers the app can show you. The assistant can make mistakes, and it hands the conversation to a person when it can't help or when you ask for one. Our providers don't use this data to train AI models.
+If you allow it when the chat asks, some replies may be written by an AI assistant, {assistant name}, using Anthropic's Claude model, accessed through OpenRouter. Until you allow it, and after you turn it off in the chat's menu, nothing you write goes to the assistant. To answer you, the assistant receives our help articles and instructions, the latest messages in your conversation (up to 30; photos aren't included), and a few details: your name and email address if we have them, your language, local time, app and iOS version, device model, subscription status and the offers the app can show you. The assistant can make mistakes, and it hands the conversation to a person when it can't help or when you ask for one. Our providers don't use this data to train AI models.
 
 **Notifications** *(Optional, if you send push notifications)*
 
-If you allow notifications, we notify you when we reply. The notification shows {the sender's name and a preview of the reply} and is delivered through Apple's push notification service. You can turn notifications off in iOS Settings at any time.
+If you allow notifications, we notify you when we reply. The notification shows {the sender's name and a preview of the reply} and is delivered through Apple's push notification service. {Optional, if you send offers or automated messages: Offers and automated messages reach your notifications only if you opted in to promotional notifications in the app; otherwise they wait in the chat.} You can turn notifications off in iOS Settings at any time.
 
 **Our team chat** *(Optional, if you connect Telegram)*
 

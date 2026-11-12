@@ -35,7 +35,9 @@ Why one Postgres for everything at the start: messages, the job queue, realtime 
 
 - **Closed beta:** `SIGNUPS=invite`, `beta_invites` and `beta_access` (migration 0012), `apps/api/scripts/beta-access.ts`; the billing page shows beta access (`docs/RUNBOOK.md`).
 - **Account email** (`apps/api/src/email.ts`): password reset and team invitations through Resend (`RESEND_API_KEY`, `EMAIL_FROM`); the dashboard has forgot/reset password, a Team page and an accept-invitation page. Better Auth's workspace deletion is off (it would leave photos, the Stripe subscription and Telegram webhooks).
-- **Legal** (`docs/legal`, drafts for counsel): published at `/legal/*` on the dashboard; sign-up links the terms and privacy policy.
+- **Legal** (`docs/legal`, drafts for counsel): published at `/legal/*` on the dashboard; sign-up links the terms and privacy policy. The contracting entity is named HireShelby.
+- **App Review** (migration 0013): the AI answers only people who allowed it in the chat (`devices.ai_consent` and `ai_consent_at`, `POST /v1/ai-consent`, `ai: {enabled, consent, processors}` in `GET /v1/conversation`; `ai.consider` returns `no_consent` otherwise), for guideline 5.1.2(i). Offers and automations' messages are pushed only with the person's opt-in to promotional notifications (`devices.promotional_push`, `promotionalPush` in the device state; the push job returns `not_opted_in`), for 4.5.4. Review cards default to Apple's rating prompt (5.6.1).
+- **SDKs:** `sdk/ios` (Swift package; CI builds the SwiftUI chat on macOS) and `sdk/react-native` (`@hireshelby/react-native`, an Expo module compiling the iOS SDK's sources; CI builds an example app). Neither is published yet: the Swift package goes to its own repository (then set `SWIFT_PACKAGE_URL` on the api) and the npm package to the `@hireshelby` scope (then `RN_PACKAGE`), which completes the dashboard's setup prompt.
 
 B1 (messaging core) as built:
 
@@ -570,6 +572,7 @@ Reception markets this but its legal docs say it isn't live yet, so it's a chanc
 - **Refusals:** enable server-side fallbacks (`fallbacks: "default"` with beta `server-side-fallback-2026-07-01`). If the final `stop_reason` is still `refusal`, hand over to a human.
 - **Debounce:** wait about 8 s after the last user message so three quick messages get one answer.
 - **Before turning it on per app:** an eval set built from real resolved conversations; Anthropic and OpenRouter are on the subprocessor list ([`SUBPROCESSORS.md`](SUBPROCESSORS.md)).
+- **Consent (App Review 5.1.2(i)):** the chat asks each person before any of their messages reach the model, naming the processors (`AiProvider.processors`); without `granted` the job returns `no_consent` and the team answers. Allowing it answers a waiting message at once.
 
 ---
 
