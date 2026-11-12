@@ -1,0 +1,8 @@
+node_modules/
+build/
+# copied from ../ios/Sources by scripts/sync-ios-sdk.mjs
+ios/HireShelbySDK/
+example/node_modules/
+example/ios/
+example/android/
+example/.expo/

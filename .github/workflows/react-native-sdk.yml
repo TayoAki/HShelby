@@ -1,0 +1,78 @@
+name: React Native SDK
+
+on:
+  # any branch, but only when the package or the iOS SDK it wraps changes (macOS runners are costly)
+  push:
+    paths:
+      - "sdk/react-native/**"
+      - "sdk/ios/Sources/**"
+      - ".github/workflows/react-native-sdk.yml"
+  pull_request:
+    paths:
+      - "sdk/react-native/**"
+      - "sdk/ios/Sources/**"
+      - ".github/workflows/react-native-sdk.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: react-native-sdk-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  javascript:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: sdk/react-native
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: sdk/react-native/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm test
+      # what npm would publish: the copied iOS SDK, the built JavaScript, the podspec
+      - run: npm pack --dry-run 2>&1 | tee pack.txt
+      - run: |
+          grep -q "ios/HireShelbySDK/UI/PrivacyInfo.xcprivacy" pack.txt
+          grep -q "ios/HireShelbyReactNative.podspec" pack.txt
+          grep -q "build/index.js" pack.txt
+
+  # Builds the example Expo app for the simulator: compiles the bridge and the iOS SDK through CocoaPods, as an
+  # app that installs the package does.
+  example-ios:
+    runs-on: macos-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: sdk/react-native/example/package-lock.json
+      # The newest stable Xcode on the runner (betas left out)
+      - run: |
+          XCODE=$(ls -d /Applications/Xcode_*.app | grep -vi beta | sort -V | tail -n 1)
+          sudo xcode-select -s "$XCODE/Contents/Developer"
+          xcodebuild -version
+          pod --version
+      - run: node sdk/react-native/scripts/sync-ios-sdk.mjs
+      - working-directory: sdk/react-native/example
+        run: npm ci
+      - working-directory: sdk/react-native/example
+        run: npx expo prebuild --platform ios --no-install
+        env:
+          CI: "1"
+      - working-directory: sdk/react-native/example/ios
+        run: pod install
+      - working-directory: sdk/react-native/example/ios
+        run: |
+          WORKSPACE=$(ls -d *.xcworkspace | head -n 1)
+          SCHEME="${WORKSPACE%.xcworkspace}"
+          xcodebuild -workspace "$WORKSPACE" -scheme "$SCHEME" -configuration Debug -sdk iphonesimulator \
+            -destination 'generic/platform=iOS Simulator' CODE_SIGNING_ALLOWED=NO build | tail -n 100
+          exit ${PIPESTATUS[0]}

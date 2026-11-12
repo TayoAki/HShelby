@@ -52,10 +52,16 @@ extension HireShelby {
         viewController.present(host, animated: animated)
     }
 
-    /// Dismisses a chat presented with ``presentChat()``.
-    public func dismissChat(animated: Bool = true) {
-        platform.presentedChat?.dismiss(animated: animated)
+    /// Dismisses a chat presented with ``presentChat()``; `completion` runs once it's gone (at once if no chat
+    /// is presented).
+    public func dismissChat(animated: Bool = true, completion: (@MainActor () -> Void)? = nil) {
+        guard let chat = platform.presentedChat, chat.presentingViewController != nil else {
+            platform.presentedChat = nil
+            completion?()
+            return
+        }
         platform.presentedChat = nil
+        chat.dismiss(animated: animated) { completion?() }
     }
 
     /// The view controller at the top of the app's key window: present paywalls from here so they show above

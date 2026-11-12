@@ -1,0 +1,17 @@
+{
+  "expo": {
+    "name": "Hire Shelby Example",
+    "slug": "hireshelby-example",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "automatic",
+    "ios": {
+      "bundleIdentifier": "com.hireshelby.example",
+      "supportsTablet": true
+    },
+    "plugins": ["expo-notifications"],
+    "experiments": {
+      "autolinkingModuleResolution": true
+    }
+  }
+}

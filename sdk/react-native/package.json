@@ -1,0 +1,57 @@
+{
+  "name": "@hireshelby/react-native",
+  "version": "0.1.0",
+  "description": "Hire Shelby: in-app support chat for React Native and Expo apps on iOS, with your team, Telegram or AI answering.",
+  "main": "build/index.js",
+  "types": "build/index.d.ts",
+  "react-native": "src/index.ts",
+  "files": [
+    "build",
+    "src",
+    "ios",
+    "!ios/build",
+    "expo-module.config.json",
+    "scripts/sync-ios-sdk.mjs",
+    "README.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "sync:ios": "node scripts/sync-ios-sdk.mjs",
+    "prepack": "npm run sync:ios && npm run build"
+  },
+  "keywords": [
+    "react-native",
+    "expo",
+    "ios",
+    "support",
+    "chat",
+    "customer-support",
+    "hireshelby"
+  ],
+  "homepage": "https://hireshelby.com",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/tayoaki/hireshelby-react-native.git"
+  },
+  "bugs": {
+    "url": "https://github.com/tayoaki/hireshelby-react-native/issues"
+  },
+  "author": "HireShelby",
+  "license": "SEE LICENSE IN LICENSE",
+  "peerDependencies": {
+    "expo": ">=55",
+    "react": "*",
+    "react-native": "*"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.0",
+    "expo-modules-core": "58.1.0",
+    "react": "19.3.0",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.7"
+  }
+}

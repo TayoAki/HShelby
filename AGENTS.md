@@ -18,6 +18,7 @@ Hire Shelby (hireshelby.com): in-app support chat for iOS apps. npm-workspaces m
 | `packages/billing` | Subscription status rules (what counts as paying), founder-spot count, Stripe→row mapping; `@hshelby/billing/testing` has a fake Stripe (API, signed webhooks, Checkout and portal pages). |
 | `packages/ui` | Phone frame and chat mock shared by web and dashboard. |
 | `sdk/ios` | The native Swift package (`HireShelby` UI + `HireShelbyCore` engine), published to its own repository. `swift build && swift test` runs on Linux for the core; the SwiftUI chat compiles only on macOS (`.github/workflows/ios-sdk.yml`). |
+| `sdk/react-native` | `@hireshelby/react-native`: an Expo module that compiles the iOS SDK's sources (copied by `npm run sync:ios`) with a Swift bridge; no-ops on Android and web. Not an npm workspace (its own lockfile); `example/` is an Expo app CI builds for the simulator (`.github/workflows/react-native-sdk.yml`). |
 
 - Local Postgres for tests: `TEST_DATABASE_URL` (default `postgres://postgres@localhost:5433/hshelby_test`).
 - Local S3 for photo tests: `TEST_S3_ENDPOINT` (default `http://127.0.0.1:5070`); run `pip install "moto[server]" && moto_server -p 5070`.
