@@ -203,37 +203,49 @@ describe("usage", () => {
     const { workspace, project, publicId } = await claimedWorkspace();
     const sent = (await (await (await registerDevice(app, publicId)).send("Hi")).json()) as any;
     const [appRow] = await deps.db.select({ id: apps.id }).from(apps).where(eq(apps.publicId, publicId));
-    // earlier tests' runs come before this cursor (ids are time-ordered)
-    const start = uuidv7();
-    const ids: string[] = [];
-    const run = async (tokens: Partial<Record<"inputTokens" | "outputTokens" | "cacheReadTokens" | "cacheWriteTokens", number>>, model: string | null = null) => {
+    const cost = new Map<string, number>();
+    const run = async (
+      price: number | null,
+      tokens: Partial<Record<"inputTokens" | "outputTokens" | "cacheReadTokens" | "cacheWriteTokens", number>>,
+      model: string | null = null,
+      ageMs = 60_000,
+    ) => {
       const runId = uuidv7();
-      await deps.db.insert(aiRuns).values({ id: runId, appId: appRow!.id, conversationId: sent.conversation.id, outcome: "replied", model, ...tokens });
-      ids.push(runId);
+      const createdAt = new Date(Date.now() - ageMs);
+      await deps.db.insert(aiRuns).values({ id: runId, appId: appRow!.id, conversationId: sent.conversation.id, outcome: "replied", model, createdAt, ...tokens });
+      if (price !== null) cost.set(runId, price);
+      return runId;
     };
-    await run({ inputTokens: 1_000_000, outputTokens: 100_000, cacheReadTokens: 1_000_000, cacheWriteTokens: 200_000 });
-    await run({ outputTokens: 50_000 }, "anthropic/claude-opus-5.5");
-    await run({}); // never called the model: left out
-    await run({ inputTokens: 2_500 }, "claude-opus-5-5");
+    // $4 / $20 / $0.20 / $5 per million input, output, cache-read and cache-write tokens
+    await run(7.2, { inputTokens: 1_000_000, outputTokens: 100_000, cacheReadTokens: 1_000_000, cacheWriteTokens: 200_000 });
+    await run(1, { outputTokens: 50_000 }, "anthropic/claude-opus-5.5");
+    await run(null, {}); // never called the model: left out
+    await run(0.01, { inputTokens: 2_500 }, "claude-opus-5-5");
+    const fresh = await run(null, { inputTokens: 1_000 }, null, 0); // still settling: shows up after ~10 s
 
+    // page through everything with the cursor, two at a time
     const items: any[] = [];
-    let after: string | null = start;
-    for (let page = 0; page < 10 && after; page++) {
-      const res = (await (await partner(`/usage?limit=2&after=${after}`)).json()) as any;
+    let after: string | null = null;
+    for (let page = 0; page < 500; page++) {
+      const res = (await (await partner(`/usage?limit=2${after ? `&after=${after}` : ""}`)).json()) as any;
       expect(res.items.length).toBeLessThanOrEqual(2);
       items.push(...res.items);
+      if (res.next === null) break;
+      expect(res.next).toBe(res.items.at(-1).id);
       after = res.next;
     }
-    expect(items.map((i) => i.id)).toEqual([ids[0], ids[1], ids[3]]);
-    // $4 / $20 / $0.20 / $5 per million input, output, cache-read and cache-write tokens
-    expect(items.map((i) => i.costUsd)).toEqual([7.2, 1, 0.01]);
-    expect(items[0]).toMatchObject({ workspaceExternalId: workspace, appExternalId: project });
-    expect(Date.now() - new Date(items[0].createdAt).getTime()).toBeLessThan(60_000);
-    expect(await (await partner(`/usage?after=${ids[3]}`)).json()).toEqual({ items: [], next: null });
+    expect(items.map((i) => i.id)).toEqual([...items.map((i) => i.id)].sort());
+    const ours = items.filter((i) => i.workspaceExternalId === workspace);
+    expect(ours.map((i) => i.id)).toEqual([...cost.keys()].sort());
+    for (const item of ours) expect(item.costUsd).toBe(cost.get(item.id));
+    expect(ours[0]).toMatchObject({ workspaceExternalId: workspace, appExternalId: project });
+    expect(Date.now() - new Date(ours[0].createdAt).getTime()).toBeLessThan(120_000);
+    expect(items.some((i) => i.id === fresh)).toBe(false);
+    expect(await (await partner(`/usage?after=${items.at(-1).id}`)).json()).toEqual({ items: [], next: null });
     expect((await partner("/usage?limit=501")).status).toBe(400);
     // the other partner doesn't see them
-    const theirs = (await (await partner(`/usage?limit=500&after=${start}`, {}, OTHER_KEY, other.app)).json()) as any;
-    expect(theirs.items).toEqual([]);
+    const theirs = (await (await partner("/usage?limit=500", {}, OTHER_KEY, other.app)).json()) as any;
+    expect(theirs.items.some((i: any) => i.workspaceExternalId === workspace)).toBe(false);
   });
 });
 

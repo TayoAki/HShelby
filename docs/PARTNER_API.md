@@ -34,7 +34,8 @@ this is Hire Shelby's side (`apps/api/src/routes/partner.ts`, tests in `apps/api
   `{ id, workspaceExternalId, appExternalId, costUsd, createdAt }`. `costUsd` prices the run's input, output,
   cache-read and cache-write tokens with `packages/core/src/pricing.ts` (Claude Opus 5.5: $4 / $20 / $0.20 / $5 per
   million) for the model the run recorded, or the configured model for older runs. `next` is the last id returned, or
-  `null` when there's nothing new. No message content ever leaves through this API.
+  `null` when there's nothing new. A run appears about 10 seconds after it's written, so the cursor never steps over
+  a run still being saved (ids are time-ordered only to the millisecond). No message content ever leaves through this API.
 
 Audit events: `partner.workspace.created`, `partner.workspace.updated`, `partner.app.created`, `app.deleted`.
 

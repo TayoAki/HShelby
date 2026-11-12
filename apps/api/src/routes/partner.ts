@@ -236,7 +236,7 @@ export function partnerRoutes(deps: Deps) {
 
   /**
    * AI runs on the partner's apps that called the model, oldest first after the cursor, with what each cost: App
-   * Builder charges its users credits for them. No message content.
+   * Builder charges its users credits for them. A run shows up about 10 seconds after it's written. No message content.
    */
   r.get("/usage", async (c) => {
     const { after, limit } = parseQuery(c, PartnerUsageQuery);
@@ -260,6 +260,9 @@ export function partnerRoutes(deps: Deps) {
         and(
           after ? gt(aiRuns.id, after) : undefined,
           sql`${aiRuns.inputTokens} + ${aiRuns.outputTokens} + ${aiRuns.cacheReadTokens} + ${aiRuns.cacheWriteTokens} > 0`,
+          // ids are time-ordered only to the millisecond, and a run can commit after a later one: wait until every
+          // run with a smaller id has been written, so the cursor never steps over one
+          sql`${aiRuns.createdAt} < now() - interval '10 seconds'`,
         ),
       )
       .orderBy(asc(aiRuns.id))
