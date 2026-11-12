@@ -145,3 +145,13 @@ describe("billing", () => {
     expect(await (await call("/api/billing")).json() as any).toEqual({ enabled: false, active: true, subscription: null, offer: null, beta: null, canManage: true });
   });
 });
+
+describe("workspaces", () => {
+  it("can't be deleted through Better Auth's endpoint, which would leave photos, billing and webhooks behind", async () => {
+    const { call } = await signUp(app);
+    const { organization } = (await (await call("/api/me")).json()) as any;
+    const res = await call("/api/auth/organization/delete", { method: "POST", body: JSON.stringify({ organizationId: organization.id }) });
+    expect(res.status).not.toBe(200);
+    expect((await (await call("/api/me")).json()) as any).toMatchObject({ organization: { id: organization.id } });
+  });
+});

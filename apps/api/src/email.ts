@@ -25,7 +25,8 @@ export function createMailer(env: MailerEnv, logger: Logger, fetchImpl: typeof f
       enabled: false,
       async send(email) {
         if (env.NODE_ENV === "production") {
-          logger.warn({ to: email.to, subject: email.subject }, "email not sent: no RESEND_API_KEY");
+          // no address in production logs: they're personal data
+          logger.warn({ subject: email.subject }, "email not sent: no RESEND_API_KEY");
         } else {
           logger.info({ to: email.to, subject: email.subject, text: email.text }, "email (not sent: no RESEND_API_KEY)");
         }

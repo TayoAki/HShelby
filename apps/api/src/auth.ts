@@ -53,6 +53,9 @@ export function createAuth({ db, env, logger, stripe: stripeClient, billing, mai
 
   const plugins = [
     organization({
+      // deleting a workspace means its photos, Stripe subscription and Telegram webhooks too, which Better Auth's
+      // endpoint doesn't do; closing a workspace is a support request until there's a full deletion job
+      disableOrganizationDeletion: true,
       // the link opens the dashboard's accept page; joining needs signing in as the invited address
       async sendInvitationEmail(data) {
         const url = `${dashboardUrl}/accept-invitation/${encodeURIComponent(data.id)}`;

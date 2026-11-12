@@ -50,3 +50,22 @@ body {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.35; }
 }
+
+/* Rendered legal documents (app/legal) */
+.legal { font-size: 15px; line-height: 1.6; color: var(--fg); }
+.legal h1 { font-size: 40px; line-height: 1.1; letter-spacing: -0.045em; margin: 0 0 16px; }
+.legal h2 { font-size: 22px; line-height: 1.25; letter-spacing: -0.02em; margin: 40px 0 12px; }
+.legal h3 { font-size: 17px; margin: 28px 0 8px; }
+.legal p, .legal ul, .legal ol, .legal table, .legal blockquote { margin: 0 0 14px; }
+.legal ul, .legal ol { padding-left: 22px; }
+.legal ul { list-style: disc; }
+.legal ol { list-style: decimal; }
+.legal li { margin: 4px 0; }
+.legal a { text-decoration: underline; text-underline-offset: 3px; }
+.legal strong { font-weight: 600; }
+.legal code { font-size: 13px; background: var(--panel); border-radius: 6px; padding: 1px 5px; }
+.legal blockquote { border-left: 3px solid var(--line); padding: 4px 0 4px 14px; color: var(--secondary); }
+.legal table { width: 100%; border-collapse: collapse; font-size: 14px; display: block; overflow-x: auto; }
+.legal th, .legal td { border-bottom: 1px solid var(--line); padding: 8px 10px 8px 0; text-align: left; vertical-align: top; }
+.legal th { font-weight: 600; }
+.legal hr { border: 0; border-top: 1px solid var(--line); margin: 32px 0; }

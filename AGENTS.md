@@ -24,6 +24,7 @@ Hire Shelby (hireshelby.com): in-app support chat for iOS apps. npm-workspaces m
 - Railway redeploys a service only when its watch patterns match the change. When an app gains a workspace dependency, add that package's path to the service's watch patterns (see `docs/BACKEND_PLAN.md` Status).
 - AI replies eval (real model, needs `ANTHROPIC_API_KEY` or `OPENROUTER_API_KEY`): `npm run eval -w @hshelby/api`. Not part of `npm test`.
 - Plan and phases: `docs/BACKEND_PLAN.md`. Stripe runs in test mode only; the API refuses `sk_live_` keys.
+- Legal documents (drafts for counsel): `docs/legal/`, published as static pages at `/legal/*` on the dashboard (`apps/dashboard/src/app/legal`); keep them true to what the product does when it changes.
 - Who processes customer data: `docs/SUBPROCESSORS.md`. Update it before data goes anywhere new (a new provider, `OPENROUTER_PROVIDERS`, a non-Claude `AI_MODEL`, an email or monitoring service).
 - Restores, the monthly restore drill and the load test: `docs/RUNBOOK.md`. The API's rate limits scale with `RATE_LIMIT_SCALE` (tests set `0`); a load test from one machine needs it raised on the api.
 
