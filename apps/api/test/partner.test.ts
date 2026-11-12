@@ -3,11 +3,12 @@ import { randomBytes } from "node:crypto";
 import Anthropic from "@anthropic-ai/sdk";
 import { startFakeStripe } from "@hshelby/billing/testing";
 import { uuidv7 } from "@hshelby/core";
-import { aiRuns, apps, auditEvents, betaInvites, members, organizations, partnerClaims, partnerWorkspaces, users } from "@hshelby/db";
+import { aiRuns, aiUsage, apps, auditEvents, betaInvites, members, organizations, partnerClaims, partnerWorkspaces, users } from "@hshelby/db";
 import { eq } from "drizzle-orm";
 import { afterAll, describe, expect, it } from "vitest";
 import { considerMessage } from "../src/ai/consider";
 import { aiProvider } from "../src/ai/provider";
+import { recordAiUsage } from "../src/ai/usage";
 import { startFakeAnthropic, toolUse } from "./fake-anthropic";
 import { makeTestApp, ORIGIN, registerDevice, reply } from "./helpers";
 
@@ -201,8 +202,7 @@ describe("workspaces and apps", () => {
 describe("usage", () => {
   it("lists the partner's AI runs that called the model, priced, a page at a time", async () => {
     const { workspace, project, publicId } = await claimedWorkspace();
-    const sent = (await (await (await registerDevice(app, publicId)).send("Hi")).json()) as any;
-    const [appRow] = await deps.db.select({ id: apps.id }).from(apps).where(eq(apps.publicId, publicId));
+    const [appRow] = await deps.db.select({ id: apps.id, organizationId: apps.organizationId }).from(apps).where(eq(apps.publicId, publicId));
     const cost = new Map<string, number>();
     const run = async (
       price: number | null,
@@ -212,7 +212,10 @@ describe("usage", () => {
     ) => {
       const runId = uuidv7();
       const createdAt = new Date(Date.now() - ageMs);
-      await deps.db.insert(aiRuns).values({ id: runId, appId: appRow!.id, conversationId: sent.conversation.id, outcome: "replied", model, createdAt, ...tokens });
+      // what a run's cost record looks like (src/ai/usage.ts); a run that used no tokens leaves none
+      const usage = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, ...tokens };
+      await recordAiUsage(deps.db, { id: runId, organizationId: appRow!.organizationId, appId: appRow!.id, kind: "reply", model, usage });
+      await deps.db.update(aiUsage).set({ createdAt }).where(eq(aiUsage.id, runId));
       if (price !== null) cost.set(runId, price);
       return runId;
     };

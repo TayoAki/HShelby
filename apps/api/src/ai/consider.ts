@@ -12,6 +12,7 @@ import { partnerWorkspaceOf } from "../partners";
 import { publishLive } from "../realtime/events";
 import { Halted, Refused, runTurn, type Executor, type TurnResult } from "./assistant";
 import { offersFor, reviewUnavailable, systemPrompt, turnPrompt, TRANSCRIPT_MESSAGES, type PersonFacts, type TranscriptMessage } from "./prompt";
+import { appRepliesLastDay, recordAiUsage } from "./usage";
 
 /*
  * The ai.consider job (phase B11): a few seconds after a person's message, the AI answers it, unless the
@@ -218,20 +219,26 @@ export async function considerMessage(deps: Deps, job: AiConsiderJob): Promise<s
     userMessageId: row.message.id,
   };
   const executor = liveExecutor(deps, target);
+  /** The run, and in the same transaction what it cost: the cost outlives the conversation (src/ai/usage.ts). */
   const record = (outcome: AiOutcome, result: Pick<TurnResult, "actions" | "notes" | "fallback" | "usage">, latencyMs: number, error: string | null = null) =>
-    db.insert(aiRuns).values({
-      id: uuidv7(),
-      appId: row.app.id,
-      conversationId: row.conversation.id,
-      messageId: row.message.id,
-      outcome,
-      actions: result.actions,
-      notes: result.notes,
-      error,
-      fallback: result.fallback,
-      model: deps.ai?.model ?? null,
-      ...result.usage,
-      latencyMs,
+    db.transaction(async (tx) => {
+      const id = uuidv7();
+      const model = deps.ai?.model ?? null;
+      await tx.insert(aiRuns).values({
+        id,
+        appId: row.app.id,
+        conversationId: row.conversation.id,
+        messageId: row.message.id,
+        outcome,
+        actions: result.actions,
+        notes: result.notes,
+        error,
+        fallback: result.fallback,
+        model,
+        ...result.usage,
+        latencyMs,
+      });
+      await recordAiUsage(tx, { id, organizationId: row.conversation.organizationId, appId: row.app.id, kind: "reply", model, usage: result.usage });
     });
   /** Hands over without a model call; false if the conversation moved on first. */
   const handOver = async (reason: string) => {
@@ -250,6 +257,15 @@ export async function considerMessage(deps: Deps, job: AiConsiderJob): Promise<s
     .where(and(eq(messages.conversationId, row.conversation.id), eq(messages.source, "ai"), gte(messages.createdAt, sql`now() - interval '1 day'`)));
   if (today!.n >= AI_DAILY_LIMIT) {
     const reason = `The AI has sent ${today!.n} messages here in the last day; a teammate should take over.`;
+    const handed = await handOver(reason);
+    await record(handed ? "handed_over" : "stopped", { actions: handed ? [{ type: "handover", reason, message: "" }] : [], notes: [], fallback: false, usage: EMPTY_USAGE }, 0);
+    return "limit";
+  }
+
+  // the limit above is per conversation, and anyone with the App ID can start another: the app has a ceiling too
+  const appCeiling = deps.env.AI_APP_DAILY_REPLIES;
+  if (appCeiling > 0 && (await appRepliesLastDay(db, row.app.id)) >= appCeiling) {
+    const reason = "The AI has reached this app's daily limit of answers; a teammate should take over.";
     const handed = await handOver(reason);
     await record(handed ? "handed_over" : "stopped", { actions: handed ? [{ type: "handover", reason, message: "" }] : [], notes: [], fallback: false, usage: EMPTY_USAGE }, 0);
     return "limit";

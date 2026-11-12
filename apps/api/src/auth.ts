@@ -10,6 +10,7 @@ import {
   members,
   organizations,
   partnerClaims,
+  partnerWorkspaces,
   sessions,
   subscriptions,
   users,
@@ -47,11 +48,18 @@ export async function isOrgAdmin(db: Db, userId: string, organizationId: string)
 type AuthDeps = { db: Db; env: Env; logger: Logger; stripe: Stripe | null; billing: Billing; mailer: Mailer };
 
 export function createAuth({ db, env, logger, stripe: stripeClient, billing, mailer }: AuthDeps) {
-  /** An unused, unexpired partner claim link for this address (App Builder's owner joining their workspace). */
+  /**
+   * An unused, unexpired partner claim link for this address (App Builder's owner joining their workspace). A link
+   * made for an address that is no longer the workspace's owner doesn't count.
+   */
   async function hasPartnerClaim(email: string) {
     const [claim] = await db
       .select({ tokenHash: partnerClaims.tokenHash })
       .from(partnerClaims)
+      .innerJoin(
+        partnerWorkspaces,
+        and(eq(partnerWorkspaces.organizationId, partnerClaims.organizationId), eq(partnerWorkspaces.ownerEmail, partnerClaims.email)),
+      )
       .where(and(eq(partnerClaims.email, email.toLowerCase()), isNull(partnerClaims.usedAt), gt(partnerClaims.expiresAt, new Date())))
       .limit(1);
     return Boolean(claim);
@@ -140,6 +148,32 @@ export function createAuth({ db, env, logger, stripe: stripeClient, billing, mai
     if (body.plan?.toLowerCase() !== (await billing.offer())?.plan) {
       throw new APIError("BAD_REQUEST", { code: "plan_unavailable", message: "That price isn't available any more. Reload to see the current one." });
     }
+  });
+
+  /**
+   * An invitation's id is what accepts it (with an account on the invited address, which sign-up doesn't verify), so
+   * only the people who can send invitations get to read the ids: owners and admins. Better Auth's own endpoints
+   * would list them to every member.
+   */
+  const invitationListGuard = createAuthMiddleware(async (ctx) => {
+    if (ctx.path !== "/organization/list-invitations") return;
+    const session = await getSessionFromCtx(ctx);
+    const organizationId = (ctx.query as { organizationId?: string } | undefined)?.organizationId || session?.session.activeOrganizationId;
+    // without a session or a workspace the endpoint refuses by itself
+    if (!session || !organizationId) return;
+    if (!(await isOrgAdmin(db, session.user.id, organizationId))) {
+      throw new APIError("FORBIDDEN", { code: "forbidden", message: "Only owners and admins can see invitations" });
+    }
+  });
+
+  /** The workspace as a member sees it: its people, without the pending invitations. */
+  const invitationListStrip = createAuthMiddleware(async (ctx) => {
+    if (ctx.path !== "/organization/get-full-organization") return;
+    const returned = ctx.context.returned as { id?: unknown; invitations?: unknown } | null | undefined;
+    if (!returned || returned instanceof Error || typeof returned.id !== "string" || !Array.isArray(returned.invitations)) return;
+    const session = await getSessionFromCtx(ctx);
+    if (session && (await isOrgAdmin(db, session.user.id, returned.id))) return;
+    return ctx.json({ ...returned, invitations: [] });
   });
 
   return betterAuth({
@@ -247,7 +281,13 @@ export function createAuth({ db, env, logger, stripe: stripeClient, billing, mai
         },
       },
     },
-    hooks: { before: checkoutGuard },
+    hooks: {
+      before: createAuthMiddleware(async (ctx) => {
+        await checkoutGuard(ctx);
+        await invitationListGuard(ctx);
+      }),
+      after: invitationListStrip,
+    },
     plugins: [...plugins, ...billingPlugins],
   });
 }

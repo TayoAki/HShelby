@@ -51,3 +51,34 @@ export const aiRuns = pgTable(
   },
   (t) => [index("ai_runs_app_idx").on(t.appId, t.createdAt.desc()), index("ai_runs_conversation_idx").on(t.conversationId)],
 );
+
+/**
+ * What each model call cost, kept apart from `ai_runs` on purpose: no foreign keys, so deleting a person's data, a
+ * device or an app (which removes its runs) leaves the cost on record. It's what the daily ceilings count and what
+ * a partner is billed from. No message content, and nothing that identifies the person.
+ */
+export const aiUsage = pgTable(
+  "ai_usage",
+  {
+    /** A reply's `ai_runs` id; a preview has its own. Time-ordered, so it's the partner feed's cursor. */
+    id: uuid("id").primaryKey(),
+    organizationId: text("organization_id").notNull(),
+    appId: uuid("app_id").notNull(),
+    kind: text("kind").$type<"reply" | "preview">().notNull(),
+    /** The partner and its ids for the workspace and the app, as they were when the model was called. */
+    partner: text("partner"),
+    workspaceExternalId: text("workspace_external_id"),
+    appExternalId: text("app_external_id"),
+    model: text("model"),
+    inputTokens: integer("input_tokens").notNull().default(0),
+    outputTokens: integer("output_tokens").notNull().default(0),
+    cacheReadTokens: integer("cache_read_tokens").notNull().default(0),
+    cacheWriteTokens: integer("cache_write_tokens").notNull().default(0),
+    createdAt: ts("created_at").notNull().defaultNow(),
+  },
+  (t) => [
+    index("ai_usage_app_idx").on(t.appId, t.createdAt.desc()),
+    index("ai_usage_organization_idx").on(t.organizationId, t.kind, t.createdAt.desc()),
+    index("ai_usage_partner_idx").on(t.partner, t.id),
+  ],
+);

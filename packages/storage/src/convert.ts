@@ -11,13 +11,32 @@ export class ImageRejected extends Error {}
 
 const startsWith = (b: Buffer, bytes: number[]) => bytes.every((v, i) => b[i] === v);
 
+/**
+ * True when markup, after an optional byte-order mark, XML declaration and comments, opens with an <svg> element.
+ * A scan rather than one pattern: a pattern with a repeated comment group backtracks exponentially on input that
+ * is all comments and no <svg>.
+ */
+function startsWithSvg(markup: string) {
+  let s = markup.replace(/^\uFEFF/, "").trimStart();
+  if (/^<\?xml/i.test(s)) {
+    const end = s.indexOf(">");
+    if (end < 0) return false;
+    s = s.slice(end + 1).trimStart();
+  }
+  while (s.startsWith("<!--")) {
+    const end = s.indexOf("-->", 4);
+    if (end < 0) return false;
+    s = s.slice(end + 3).trimStart();
+  }
+  return /^<svg[\s>]/i.test(s);
+}
+
 /** What an upload really is, by its first bytes (and for SVG, its markup), whatever it claims to be. */
 export function sniffImage(b: Buffer): "png" | "jpeg" | "webp" | "svg" | null {
   if (startsWith(b, [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])) return "png";
   if (startsWith(b, [0xff, 0xd8, 0xff])) return "jpeg";
   if (b.subarray(0, 4).toString("latin1") === "RIFF" && b.subarray(8, 12).toString("latin1") === "WEBP") return "webp";
-  const head = b.subarray(0, 1024).toString("utf8").replace(/^﻿/, "").trimStart();
-  if (/^(<\?xml[^>]*>\s*)?(<!--[\s\S]*?-->\s*)*<svg[\s>]/i.test(head)) return "svg";
+  if (startsWithSvg(b.subarray(0, 1024).toString("utf8"))) return "svg";
   return null;
 }
 

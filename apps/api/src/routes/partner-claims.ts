@@ -64,6 +64,15 @@ export function partnerClaimRoutes(deps: Deps) {
         .where(and(eq(partnerClaims.tokenHash, claim.tokenHash), isNull(partnerClaims.usedAt)))
         .returning();
       if (!used) throw new ApiError(403, "forbidden", "This link was already used");
+      // the partner may have named another owner since the link was made (read here, so a change can't slip in between)
+      const [workspace] = await tx
+        .select({ ownerEmail: partnerWorkspaces.ownerEmail })
+        .from(partnerWorkspaces)
+        .where(eq(partnerWorkspaces.organizationId, claim.organizationId))
+        .for("update");
+      if (!workspace || workspace.ownerEmail !== claim.email) throw new ApiError(403, "forbidden", "This link no longer works");
+      // the owner is in: their other unused links stop working too
+      await tx.delete(partnerClaims).where(and(eq(partnerClaims.organizationId, claim.organizationId), isNull(partnerClaims.usedAt)));
       const added = await tx
         .insert(members)
         .values({ id: uuidv7(), organizationId: claim.organizationId, userId: user.id, role: "owner" })

@@ -9,15 +9,17 @@ import {
   type ReportedPaywall,
 } from "@hshelby/contracts";
 import { uuidv7 } from "@hshelby/core";
-import { aiRuns, aiSettings, appPaywalls, auditEvents, conversations, devices } from "@hshelby/db";
+import { aiRuns, aiSettings, aiUsage, appPaywalls, auditEvents, conversations, devices } from "@hshelby/db";
 import { and, count, desc, eq, gte, sql, sum } from "drizzle-orm";
 import { Hono } from "hono";
 import { runTurn, type Executor } from "../ai/assistant";
 import { getAiSettings, personFacts, transcriptOf } from "../ai/consider";
 import { offersFor, reviewUnavailable, systemPrompt, turnPrompt, type PersonFacts, type TranscriptMessage } from "../ai/prompt";
+import { recordAiUsage, workspacePreviewsLastDay } from "../ai/usage";
 import type { AppEnv, Deps } from "../context";
 import { ApiError, notFound } from "../errors";
 import { requireOrgAdmin } from "../middleware";
+import { partnerWorkspaceOf } from "../partners";
 import { parseJson } from "../validation";
 import { findOrgApp } from "./apps";
 
@@ -41,14 +43,20 @@ export function aiRoutes(deps: Deps) {
         replied: sql<number>`count(*) filter (where ${aiRuns.outcome} in ('replied', 'sent_offer', 'asked_review'))`.mapWith(Number),
         handedOver: sql<number>`count(*) filter (where ${aiRuns.outcome} = 'handed_over')`.mapWith(Number),
         failed: sql<number>`count(*) filter (where ${aiRuns.outcome} = 'failed')`.mapWith(Number),
-        inputTokens: sum(aiRuns.inputTokens).mapWith(Number),
-        outputTokens: sum(aiRuns.outputTokens).mapWith(Number),
-        cacheReadTokens: sum(aiRuns.cacheReadTokens).mapWith(Number),
-        cacheWriteTokens: sum(aiRuns.cacheWriteTokens).mapWith(Number),
       })
       .from(aiRuns)
       .where(and(eq(aiRuns.appId, app.id), gte(aiRuns.createdAt, since)));
-    const t = totals!;
+    // tokens come from the cost ledger: it includes "Try it" previews and runs whose conversations were deleted
+    const [used] = await db
+      .select({
+        inputTokens: sum(aiUsage.inputTokens).mapWith(Number),
+        outputTokens: sum(aiUsage.outputTokens).mapWith(Number),
+        cacheReadTokens: sum(aiUsage.cacheReadTokens).mapWith(Number),
+        cacheWriteTokens: sum(aiUsage.cacheWriteTokens).mapWith(Number),
+      })
+      .from(aiUsage)
+      .where(and(eq(aiUsage.appId, app.id), gte(aiUsage.createdAt, since)));
+    const t = { ...totals!, ...used! };
     const overview: AiOverview = {
       settings,
       available: Boolean(deps.ai),
@@ -83,12 +91,22 @@ export function aiRoutes(deps: Deps) {
 
   /**
    * What the AI would do with a made-up exchange or a real conversation, without sending anything. Uses the
-   * unsaved settings when given. Costs a model call, so it's for admins.
+   * unsaved settings when given. Costs a model call, so it's for admins, and it passes the gates a real answer
+   * does: the partner's AI switch, the subscription, and a daily ceiling. What it used goes in the cost ledger.
    */
   r.post("/:id/ai/preview", requireOrgAdmin, async (c) => {
     const input = await parseJson(c, AiPreviewInput);
-    const app = await findOrgApp(db, c.get("org").id, c.req.param("id"));
+    const org = c.get("org");
+    const app = await findOrgApp(db, org.id, c.req.param("id"));
     if (!deps.ai) throw unavailable();
+    if ((await partnerWorkspaceOf(db, org.id))?.aiAllowed === false) {
+      throw new ApiError(409, "ai_unavailable", "AI replies are switched off for this workspace");
+    }
+    if (!(await deps.billing.isActive(org.id))) throw new ApiError(402, "subscription_inactive", "Subscribe to try AI replies.");
+    const ceiling = deps.env.AI_WORKSPACE_DAILY_PREVIEWS;
+    if (ceiling > 0 && (await workspacePreviewsLastDay(db, org.id)) >= ceiling) {
+      throw new ApiError(429, "rate_limited", "That's today's limit of AI previews for this workspace. Try again tomorrow.");
+    }
     const settings = input.settings ?? (await getAiSettings(db, app.id));
 
     let person: PersonFacts;
@@ -148,6 +166,7 @@ export function aiRoutes(deps: Deps) {
         },
         dryRun,
       );
+      await recordAiUsage(db, { id: uuidv7(), organizationId: org.id, appId: app.id, kind: "preview", model: deps.ai.model, usage: result.usage });
       const preview: AiPreview = {
         actions: result.actions,
         notes: result.notes,

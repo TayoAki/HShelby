@@ -10,8 +10,8 @@ import {
   type PartnerWorkspace,
 } from "@hshelby/contracts";
 import { base62, encryptSecret, newIdentitySecret, newPublicAppId, tokenCostUsd, uuidv7 } from "@hshelby/core";
-import { aiRuns, apps, auditEvents, members, organizations, partnerApps, partnerClaims, partnerWorkspaces, users, type Db, type Tx } from "@hshelby/db";
-import { and, asc, count, eq, gt, sql } from "drizzle-orm";
+import { aiUsage, apps, auditEvents, members, organizations, partnerApps, partnerClaims, partnerWorkspaces, users, type Db, type Tx } from "@hshelby/db";
+import { and, asc, count, eq, gt, isNotNull, isNull, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { createMiddleware } from "hono/factory";
 import type { Deps } from "../context";
@@ -86,6 +86,10 @@ export function partnerRoutes(deps: Deps) {
     return row;
   }
 
+  /** Claim links made for an owner the partner has since replaced must not let that address in. */
+  const dropUnusedClaims = (tx: Db | Tx, organizationId: string) =>
+    tx.delete(partnerClaims).where(and(eq(partnerClaims.organizationId, organizationId), isNull(partnerClaims.usedAt)));
+
   async function toWorkspace(row: WorkspaceRow): Promise<PartnerWorkspace> {
     const [joined] = await db.select({ n: count() }).from(members).where(eq(members.organizationId, row.organizationId));
     return { externalId: row.externalId, active: row.active, aiAllowed: row.aiAllowed, claimed: joined!.n > 0, dashboardUrl };
@@ -105,6 +109,7 @@ export function partnerRoutes(deps: Deps) {
           .set({ ownerEmail: input.ownerEmail, updatedAt: new Date() })
           .where(eq(partnerWorkspaces.organizationId, existing.organizationId))
           .returning();
+        await dropUnusedClaims(tx, existing.organizationId);
         await audit(tx, existing.organizationId, "partner.workspace.updated", existing.organizationId, { externalId, ownerEmail: input.ownerEmail });
         return { row: updated!, created: false };
       }
@@ -137,6 +142,7 @@ export function partnerRoutes(deps: Deps) {
         .set({ ...changes, updatedAt: new Date() })
         .where(eq(partnerWorkspaces.organizationId, existing.organizationId))
         .returning();
+      if ("ownerEmail" in changes) await dropUnusedClaims(tx, existing.organizationId);
       await audit(tx, existing.organizationId, "partner.workspace.updated", existing.organizationId, { externalId, ...changes });
       return updated!;
     });
@@ -235,44 +241,35 @@ export function partnerRoutes(deps: Deps) {
   });
 
   /**
-   * AI runs on the partner's apps that called the model, oldest first after the cursor, with what each cost: App
-   * Builder charges its users credits for them. A run shows up about 10 seconds after it's written. No message content.
+   * Model calls for the partner's apps (answers, and the owner's "Try it" previews), oldest first after the cursor,
+   * with what each cost: App Builder charges its users credits for them. Read from the cost ledger, so a call stays
+   * listed after its conversation, device or app is deleted. A call shows up about 10 seconds after it's written.
+   * No message content.
    */
   r.get("/usage", async (c) => {
     const { after, limit } = parseQuery(c, PartnerUsageQuery);
     const rows = await db
-      .select({
-        id: aiRuns.id,
-        model: aiRuns.model,
-        inputTokens: aiRuns.inputTokens,
-        outputTokens: aiRuns.outputTokens,
-        cacheReadTokens: aiRuns.cacheReadTokens,
-        cacheWriteTokens: aiRuns.cacheWriteTokens,
-        createdAt: aiRuns.createdAt,
-        appExternalId: partnerApps.externalId,
-        workspaceExternalId: partnerWorkspaces.externalId,
-      })
-      .from(aiRuns)
-      .innerJoin(partnerApps, and(eq(partnerApps.appId, aiRuns.appId), eq(partnerApps.partner, partner)))
-      .innerJoin(apps, eq(apps.id, aiRuns.appId))
-      .innerJoin(partnerWorkspaces, and(eq(partnerWorkspaces.organizationId, apps.organizationId), eq(partnerWorkspaces.partner, partner)))
+      .select()
+      .from(aiUsage)
       .where(
         and(
-          after ? gt(aiRuns.id, after) : undefined,
-          sql`${aiRuns.inputTokens} + ${aiRuns.outputTokens} + ${aiRuns.cacheReadTokens} + ${aiRuns.cacheWriteTokens} > 0`,
-          // ids are time-ordered only to the millisecond, and a run can commit after a later one: wait until every
-          // run with a smaller id has been written, so the cursor never steps over one
-          sql`${aiRuns.createdAt} < now() - interval '10 seconds'`,
+          eq(aiUsage.partner, partner),
+          isNotNull(aiUsage.workspaceExternalId),
+          isNotNull(aiUsage.appExternalId),
+          after ? gt(aiUsage.id, after) : undefined,
+          // ids are time-ordered only to the millisecond, and a call can commit after a later one: wait until every
+          // call with a smaller id has been written, so the cursor never steps over one
+          sql`${aiUsage.createdAt} < now() - interval '10 seconds'`,
         ),
       )
-      .orderBy(asc(aiRuns.id))
+      .orderBy(asc(aiUsage.id))
       .limit(limit);
     // runs recorded before the model was stored were answered by the configured model
     const fallbackModel = deps.ai?.model ?? null;
     const items = rows.map((r) => ({
       id: r.id,
-      workspaceExternalId: r.workspaceExternalId,
-      appExternalId: r.appExternalId,
+      workspaceExternalId: r.workspaceExternalId!,
+      appExternalId: r.appExternalId!,
       costUsd: tokenCostUsd(r, r.model ?? fallbackModel),
       createdAt: r.createdAt.toISOString(),
     }));

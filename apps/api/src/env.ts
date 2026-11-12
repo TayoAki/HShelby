@@ -77,6 +77,13 @@ const EnvSchema = z.object({
     .string()
     .regex(/^[a-z0-9-]{2,40}$/, "PARTNER_NAME: lowercase letters, digits and dashes")
     .default("appbuilder"),
+  /**
+   * Ceilings on what the AI may cost, counted from the cost ledger (src/ai/usage.ts) so a new device or a deleted
+   * one doesn't reset them: model calls answering one app's conversations in 24 hours (past it, conversations go
+   * to the team), and "Try it" previews per workspace in 24 hours. 0 means no ceiling.
+   */
+  AI_APP_DAILY_REPLIES: z.coerce.number().int().min(0).default(2000),
+  AI_WORKSPACE_DAILY_PREVIEWS: z.coerce.number().int().min(0).default(100),
   /** Multiplies every rate limit (src/rate-limit.ts); 0 turns them off. */
   RATE_LIMIT_SCALE: z.coerce.number().min(0).default(1),
 });

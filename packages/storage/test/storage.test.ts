@@ -54,3 +54,21 @@ describe("storage", () => {
     expect(await storage.read("apps/c/1", 10)).toBeNull();
   });
 });
+
+describe("sniffImage", () => {
+  it("recognizes SVG after a byte-order mark, an XML declaration and comments", async () => {
+    const { sniffImage } = await import("../src/convert");
+    expect(sniffImage(Buffer.from("<svg xmlns='http://www.w3.org/2000/svg'/>"))).toBe("svg");
+    expect(sniffImage(Buffer.from("﻿<?xml version='1.0'?>\n<!-- a --> <!-- b -->\n<SVG\twidth='1'>"))).toBe("svg");
+    expect(sniffImage(Buffer.from("<!-- <svg> -->"))).toBeNull();
+    expect(sniffImage(Buffer.from("<svgx/>"))).toBeNull();
+    expect(sniffImage(Buffer.from("<html><svg/></html>"))).toBeNull();
+  });
+
+  it("takes no longer on a file of comments with no <svg> (it used to take exponentially longer)", async () => {
+    const { sniffImage } = await import("../src/convert");
+    const started = performance.now();
+    expect(sniffImage(Buffer.from("<!---->".repeat(146)))).toBeNull();
+    expect(performance.now() - started).toBeLessThan(50);
+  });
+});

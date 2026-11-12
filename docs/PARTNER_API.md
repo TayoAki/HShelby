@@ -29,8 +29,11 @@ this is Hire Shelby's side (`apps/api/src/routes/partner.ts`, tests in `apps/api
 - `app`: `{ externalId, appId, name }`; `appId` is the public `app_…` ID the SDK takes. Created like the dashboard's
   apps but without its subscription check. A deleted project's next PUT gets a new app.
 - `claim-link`: the dashboard's URL once a member has the workspace's owner email; otherwise a new one-time link
-  `/claim/<token>` for that email, valid 7 days (stored as the token's SHA-256 in `partner_claims`).
-- `usage`: AI runs on the partner's apps that called the model, oldest first after `after`; each
+  `/claim/<token>` for that email, valid 7 days (stored as the token's SHA-256 in `partner_claims`). Changing the
+  workspace's `ownerEmail` (PUT or PATCH) ends every unused link, and the owner joining with one ends the others.
+- `usage`: model calls for the partner's apps, oldest first after `after`: the AI's answers and the owner's "Try it"
+  previews. Read from the cost ledger (`ai_usage`, written with each call), so a call stays listed after its
+  conversation, device or app is deleted, with the project id it had when it was made. Each
   `{ id, workspaceExternalId, appExternalId, costUsd, createdAt }`. `costUsd` prices the run's input, output,
   cache-read and cache-write tokens with `packages/core/src/pricing.ts` (Claude Opus 5.5: $4 / $20 / $0.20 / $5 per
   million) for the model the run recorded, or the configured model for older runs. `next` is the last id returned, or
@@ -49,4 +52,5 @@ Audit events: `partner.workspace.created`, `partner.workspace.updated`, `partner
 - **Joining:** the owner opens the claim link (`apps/dashboard/src/app/claim/[token]`), signs up or in with the
   address it was made for (a valid claim lets them sign up while sign-ups are invite-only, without an empty
   workspace of their own) and joins as owner (`POST /api/partner-claims/:token/accept`). A used or expired link says
-  so and offers sign-in.
+  so and offers sign-in. A link made for an address that is no longer the workspace's owner doesn't exist any more:
+  it opens neither the workspace nor the closed sign-up.
