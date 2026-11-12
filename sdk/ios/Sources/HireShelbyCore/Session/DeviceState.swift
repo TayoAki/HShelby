@@ -9,6 +9,8 @@ struct DeviceStateSnapshot: Codable, Equatable, Sendable {
     var metadata: [String: String]?
     /// Nil: no token (a token the server has gets cleared with `push: null`).
     var push: WirePushRegistration?
+    /// The person opted in to promotional notifications in the app (App Review 4.5.4). Nil: never reported.
+    var promotionalPush: Bool?
     var paywalls: [WirePaywall]?
     var storekit: WireStoreKit?
     var appearance: JSONValue?
@@ -22,6 +24,7 @@ struct DeviceStateSnapshot: Codable, Equatable, Sendable {
             identityToken: identityToken,
             metadata: metadata,
             push: push.map { .value($0) } ?? .omit,
+            promotionalPush: promotionalPush,
             paywalls: paywalls,
             storekit: storekit,
             appearance: appearance
@@ -36,6 +39,7 @@ struct DeviceStateSnapshot: Codable, Equatable, Sendable {
         if let identityToken, identityToken != acknowledgedToken { body.identityToken = identityToken }
         if let metadata, metadata != acknowledged.metadata { body.metadata = metadata }
         if push != acknowledged.push { body.push = push.map { .value($0) } ?? .null }
+        if let promotionalPush, promotionalPush != acknowledged.promotionalPush { body.promotionalPush = promotionalPush }
         if let paywalls, paywalls != acknowledged.paywalls { body.paywalls = paywalls }
         if let storekit, storekit != acknowledged.storekit { body.storekit = storekit }
         if let appearance, appearance != acknowledged.appearance { body.appearance = appearance }
@@ -55,6 +59,7 @@ struct DeviceStateSnapshot: Codable, Equatable, Sendable {
             case "identity" where identity != nil: identity = nil; dropped.insert(field)
             case "metadata" where metadata != nil: metadata = nil; dropped.insert(field)
             case "push" where push != nil: push = nil; dropped.insert(field)
+            case "promotionalPush" where promotionalPush != nil: promotionalPush = nil; dropped.insert(field)
             case "paywalls" where paywalls != nil: paywalls = nil; dropped.insert(field)
             case "storekit" where storekit != nil: storekit = nil; dropped.insert(field)
             case "appearance" where appearance != nil: appearance = nil; dropped.insert(field)
@@ -81,18 +86,19 @@ struct DeviceStateBody: Encodable, Sendable {
     var identityToken: String?
     var metadata: [String: String]?
     var push: Patch<WirePushRegistration> = .omit
+    var promotionalPush: Bool?
     var paywalls: [WirePaywall]?
     var storekit: WireStoreKit?
     var appearance: JSONValue?
 
     private enum Keys: String, CodingKey {
-        case appId, device, identity, identityToken, metadata, push, paywalls, storekit, appearance
+        case appId, device, identity, identityToken, metadata, push, promotionalPush, paywalls, storekit, appearance
     }
 
     var isEmpty: Bool {
         if case .omit = push {
             return appId == nil && device == nil && identity == nil && identityToken == nil && metadata == nil
-                && paywalls == nil && storekit == nil && appearance == nil
+                && promotionalPush == nil && paywalls == nil && storekit == nil && appearance == nil
         }
         return false
     }
@@ -109,6 +115,7 @@ struct DeviceStateBody: Encodable, Sendable {
         case .null: try c.encodeNil(forKey: .push)
         case .value(let registration): try c.encode(registration, forKey: .push)
         }
+        try c.encodeIfPresent(promotionalPush, forKey: .promotionalPush)
         try c.encodeIfPresent(paywalls, forKey: .paywalls)
         try c.encodeIfPresent(storekit, forKey: .storekit)
         try c.encodeIfPresent(appearance, forKey: .appearance)

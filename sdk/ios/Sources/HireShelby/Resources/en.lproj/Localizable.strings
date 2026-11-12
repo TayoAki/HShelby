@@ -61,3 +61,14 @@
 /* Day headers */
 "date.today" = "Today";
 "date.yesterday" = "Yesterday";
+
+/* AI replies: asked before any message goes to the AI (App Review 5.1.2(i)) */
+"ai.consent.title" = "AI replies";
+/* %@: who processes the messages, e.g. "OpenRouter and Anthropic" */
+"ai.consent.text" = "Support can answer faster with an AI assistant. If you allow it, your messages here and the details this app shares with support are sent to %@ to write replies. AI replies are labelled, and a person can still answer. You can turn this off anytime in the menu.";
+"ai.consent.provider" = "an AI provider";
+"ai.consent.allow" = "Allow";
+"ai.consent.decline" = "Not now";
+"ai.consent.failed" = "Your choice couldn't be saved. Check your connection and try again.";
+"ai.menu.toggle" = "AI replies";
+"action.more" = "More";

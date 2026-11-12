@@ -190,10 +190,30 @@ struct WireSending: Codable, Equatable, Sendable {
     let reason: String?
 }
 
+/// `SdkAi`: whether the app's AI may answer, the person's choice ("granted", "declined" or null), and who
+/// processes their messages when they allow it.
+struct WireAI: Codable, Equatable, Sendable {
+    let enabled: Bool
+    let consent: String?
+    let processors: [String]
+}
+
+/// `AiConsentInput`: `POST /v1/ai-consent`.
+struct WireAIConsentInput: Encodable, Sendable {
+    let consent: String
+}
+
+/// `POST /v1/ai-consent`'s answer.
+struct WireAIConsentResult: Decodable, Sendable {
+    let ai: WireAI
+}
+
 /// `SdkSync`: `GET /v1/conversation`. `conversation` is null until the device's first message.
 struct WireSync: Decodable, Sendable {
     let identity: WireIdentity
     let sending: WireSending
+    /// Absent from servers older than the AI consent step.
+    let ai: WireAI?
     let conversation: WireConversation?
     let messages: [WireMessage]
     let hasMore: Bool

@@ -25,10 +25,23 @@ describe("push.send", () => {
 
   it("describes a card that has no text", async () => {
     const card = { type: "paywall", paywallId: "pro", paywallTitle: "Pro yearly", buttonLabel: null } as const;
-    const s = await scenario({ reply: { kind: "paywall", card, text: "" } });
+    const s = await scenario({ reply: { kind: "paywall", card, text: "" }, device: { promotionalPush: true } });
     await deliverMessagePush(deps, s.replyId, once);
     const { payload } = production.requests.find((r) => r.deviceToken === s.token)!;
     expect(payload).toMatchObject({ aps: { alert: { body: "Ada: Sent an offer: Pro yearly" } } });
+  });
+
+  it("pushes offers and automations' messages only to people who opted in to promotional notifications", async () => {
+    const card = { type: "paywall", paywallId: "pro", paywallTitle: "Pro yearly", buttonLabel: null } as const;
+    const offer = await scenario({ reply: { kind: "paywall", card, text: "Half price" } });
+    expect(await deliverMessagePush(deps, offer.replyId, once)).toBe("not_opted_in");
+    const automated = await scenario({ reply: { source: "automation", text: "How's it going?" } });
+    expect(await deliverMessagePush(deps, automated.replyId, once)).toBe("not_opted_in");
+    expect(production.requests.some((r) => r.deviceToken === offer.token || r.deviceToken === automated.token)).toBe(false);
+    // a teammate's reply is never promotional
+    expect(await deliverMessagePush(deps, (await scenario()).replyId, once)).toBe("delivered");
+    const optedIn = await scenario({ reply: { source: "automation", text: "How's it going?" }, device: { promotionalPush: true } });
+    expect(await deliverMessagePush(deps, optedIn.replyId, once)).toBe("delivered");
   });
 
   it("leaves the badge to apps that own it", async () => {

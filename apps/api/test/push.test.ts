@@ -57,6 +57,22 @@ describe("device push tokens", () => {
     expect((await deviceRow(id)).pushToken).toBeNull();
   });
 
+  it("records the person's opt-in to promotional notifications, off until the app reports it", async () => {
+    const { publicId } = await workspaceWithApp(app);
+    const device = await registerDevice(app, publicId, push(newToken()));
+    const id = deviceIdOf(device.session);
+    expect((await deviceRow(id)).promotionalPush).toBe(false);
+    expect((await device.sdk("/v1/device", { method: "PATCH", json: { promotionalPush: true } })).status).toBe(200);
+    expect((await deviceRow(id)).promotionalPush).toBe(true);
+    // other updates leave it alone
+    await device.sdk("/v1/device", { method: "PATCH", json: push(newToken()) });
+    expect((await deviceRow(id)).promotionalPush).toBe(true);
+    await device.sdk("/v1/device", { method: "PATCH", json: { promotionalPush: false } });
+    expect((await deviceRow(id)).promotionalPush).toBe(false);
+    const optedIn = await registerDevice(app, publicId, { promotionalPush: true });
+    expect((await deviceRow(deviceIdOf(optedIn.session))).promotionalPush).toBe(true);
+  });
+
   it("refuses tokens that aren't raw APNs tokens", async () => {
     const { publicId } = await workspaceWithApp(app);
     const device = await registerDevice(app, publicId);

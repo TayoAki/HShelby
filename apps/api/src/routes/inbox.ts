@@ -138,7 +138,12 @@ export function conversationRoutes(deps: Deps) {
         : null,
     setup: row.setupConversationId === row.conversation.id,
     ai: row.aiEnabled
-      ? { state: row.conversation.aiState, reason: row.conversation.aiStateReason, at: row.conversation.aiStateAt?.toISOString() ?? null }
+      ? {
+          state: row.conversation.aiState,
+          reason: row.conversation.aiStateReason,
+          at: row.conversation.aiStateAt?.toISOString() ?? null,
+          consent: row.device.aiConsent,
+        }
       : null,
   });
 

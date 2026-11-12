@@ -471,7 +471,12 @@ export function Thread({ conversationId }: { conversationId: string }) {
           <p
             className={`mx-5 mb-2 rounded-2xl px-4 py-3 text-[13px] ${conversation.ai.state === "handed_over" ? "bg-[#fff7e6] text-[#8a5a00]" : "bg-panel text-secondary"}`}
           >
-            {conversation.ai.state === "active" && "The AI answers this conversation; your reply takes it over. "}
+            {conversation.ai.state === "active" &&
+              (conversation.ai.consent === "granted"
+                ? "The AI answers this conversation; your reply takes it over. "
+                : conversation.ai.consent === "declined"
+                  ? "This person turned AI replies off in the app, so the AI won't answer: reply yourself. "
+                  : "The AI answers once this person allows AI replies in the app; until then, reply yourself. ")}
             {conversation.ai.state === "paused" && "The AI is paused here until someone hands it back or resolves the conversation. "}
             {conversation.ai.state === "handed_over" && `The AI handed this over${conversation.ai.reason ? `: ${conversation.ai.reason}` : "."} `}
             <button type="button" onClick={() => setAi(conversation.ai!.state === "active" ? "paused" : "active")} className="text-fg underline underline-offset-2">

@@ -103,6 +103,8 @@ public enum HireShelbyEvent: Equatable, Sendable {
     case paywallOpened(paywallId: String)
     /// ``HireShelbyClient/deleteData()`` finished.
     case dataDeleted
+    /// The person allowed AI replies, or turned them off, and the server recorded it.
+    case aiRepliesChanged(allowed: Bool)
     /// The server refused an identity token (`identity_token_invalid` or `identity_token_expired`): fetch a fresh
     /// one from your server and call `identify(token:)` again. An existing verification stays.
     case identityRejected(HireShelbyError)

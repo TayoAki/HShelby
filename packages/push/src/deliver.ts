@@ -72,7 +72,7 @@ export async function deliverMessagePush(
   deps: PushDeps,
   messageId: string,
   { lastAttempt }: { lastAttempt: boolean },
-): Promise<PushOutcome | "skipped" | "in_chat"> {
+): Promise<PushOutcome | "skipped" | "in_chat" | "not_opted_in"> {
   const [row] = await deps.db
     .select({
       message: messages,
@@ -94,6 +94,8 @@ export async function deliverMessagePush(
   if (!row || !row.config || row.message.sender !== "agent") return "skipped";
   if (!device?.pushToken || !device.pushEnv || device.signedOutAt) return "skipped";
   if (isInChat(device)) return "in_chat";
+  // offers and automations' messages are promotional: pushed only with the person's opt-in (App Review 4.5.4)
+  if ((row.message.kind === "paywall" || row.message.source === "automation") && !device.promotionalPush) return "not_opted_in";
 
   const result = await deps.apns.send(credentials(row.config, deps.keyring), device.pushEnv, {
     deviceToken: device.pushToken,

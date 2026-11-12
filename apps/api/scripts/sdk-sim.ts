@@ -19,6 +19,7 @@
  *                   message and asked to open the chat. In --chat, type /track EVENT.
  * --storekit-tx ID  report a StoreKit original transaction ID (repeatable), which App Store notifications match
  * --paying          report that StoreKit says the person pays
+ * --allow-ai yes|no answer the chat's AI question (the AI only answers people who allowed it)
  * --logout          logout(): end this device; the next run registers a new one
  * --delete          deleteData(): remove this device and its history
  * --new-device      start over as a new install
@@ -67,6 +68,7 @@ const { values: args } = parseArgs({
     track: { type: "string", multiple: true, default: [] },
     "storekit-tx": { type: "string", multiple: true },
     paying: { type: "boolean" },
+    "allow-ai": { type: "string" },
     logout: { type: "boolean", default: false },
     delete: { type: "boolean", default: false },
   },
@@ -279,6 +281,13 @@ const history = await request<SdkSync>("/v1/conversation?limit=20");
 history.messages.forEach(print);
 lastSeq = history.messages.at(-1)?.seq ?? 0;
 if (!history.sending.allowed) console.log(`(sending is off: ${history.sending.reason})`);
+if (args["allow-ai"]) {
+  const consent = args["allow-ai"] === "yes" ? "granted" : "declined";
+  await request("/v1/ai-consent", { method: "POST", body: JSON.stringify({ consent }) });
+  console.log(`(AI replies ${consent === "granted" ? "allowed" : "turned off"})`);
+} else if (history.ai.enabled && history.ai.consent === null) {
+  console.log(`(the AI won't answer until you allow it: --allow-ai yes; it goes to ${history.ai.processors.join(" and ")})`);
+}
 
 for (const text of args.say) {
   await send(text);

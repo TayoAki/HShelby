@@ -171,6 +171,39 @@ extension HireShelbyConversation {
         }
     }
 
+    /// AI replies in this chat. When the app's team turns them on, the chat asks the person first and the AI
+    /// answers only those who allow it (App Review guideline 5.1.2(i)); the team answers everyone.
+    public struct AIReplies: Equatable, Sendable {
+        public enum Consent: String, Equatable, Sendable {
+            case granted
+            case declined
+        }
+
+        /// The app's AI may answer in this chat (once the person allows it).
+        public var isEnabled: Bool
+        /// The person's choice; nil until they make one.
+        public var consent: Consent?
+        /// Who receives the person's messages to write AI replies ("OpenRouter", "Anthropic"), to name when asking.
+        public var processors: [String]
+
+        /// Ask now: AI replies are on and the person hasn't chosen.
+        public var needsConsent: Bool { isEnabled && consent == nil }
+        /// The AI answers this person.
+        public var isAllowed: Bool { isEnabled && consent == .granted }
+
+        public static let off = AIReplies(isEnabled: false, consent: nil, processors: [])
+
+        public init(isEnabled: Bool, consent: Consent?, processors: [String]) {
+            self.isEnabled = isEnabled
+            self.consent = consent
+            self.processors = processors
+        }
+
+        init(_ wire: WireAI) {
+            self.init(isEnabled: wire.enabled, consent: wire.consent.flatMap(Consent.init(rawValue:)), processors: wire.processors)
+        }
+    }
+
     /// The chat's connection to the API while it's on screen.
     public enum ConnectionState: Equatable, Sendable {
         /// The chat isn't on screen.

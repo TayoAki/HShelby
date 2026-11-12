@@ -297,6 +297,51 @@ final class ConversationTests: XCTestCase {
         client.conversation.close()
     }
 
+    func testAsksBeforeAIRepliesAndRecordsTheAnswer() async throws {
+        let api = FakeAPI()
+        let client = try makeClient(api: api)
+        client.start()
+        try await client.flush()
+        let deviceId = try XCTUnwrap(api.allDevices.first?.id)
+        var events: [HireShelbyEvent] = []
+        client.onEvent = { events.append($0) }
+
+        // AI off: nothing to ask
+        client.conversation.open()
+        await eventually("loaded") { client.conversation.hasLoaded }
+        XCTAssertEqual(client.conversation.aiReplies, .off)
+        client.conversation.close()
+
+        api.aiEnabled = true
+        client.conversation.open()
+        await eventually("AI on") { client.conversation.aiReplies.isEnabled }
+        XCTAssertTrue(client.conversation.aiReplies.needsConsent)
+        XCTAssertEqual(client.conversation.aiReplies.processors, ["OpenRouter", "Anthropic"])
+
+        // offline: the answer is put back and the error says why
+        api.fail("POST /v1/ai-consent", with: .connectionError(.notConnectedToInternet), times: 4)
+        do {
+            try await client.conversation.setAIReplies(allowed: true)
+            XCTFail("expected an error")
+        } catch let error as HireShelbyError {
+            XCTAssertEqual(error.code, .connectionFailed)
+        }
+        XCTAssertTrue(client.conversation.aiReplies.needsConsent)
+        XCTAssertNil(api.aiConsent(of: deviceId))
+
+        try await client.conversation.setAIReplies(allowed: true)
+        XCTAssertTrue(client.conversation.aiReplies.isAllowed)
+        XCTAssertEqual(api.aiConsent(of: deviceId), "granted")
+        try await client.conversation.setAIReplies(allowed: false)
+        XCTAssertEqual(client.conversation.aiReplies.consent, .declined)
+        XCTAssertFalse(client.conversation.aiReplies.needsConsent)
+        XCTAssertEqual(api.aiConsent(of: deviceId), "declined")
+        XCTAssertEqual(events.filter { if case .aiRepliesChanged = $0 { true } else { false } }, [
+            .aiRepliesChanged(allowed: true), .aiRepliesChanged(allowed: false),
+        ])
+        client.conversation.close()
+    }
+
     func testLogoutForgetsTheConversationAndUnsentMessages() async throws {
         let api = FakeAPI()
         let client = try makeClient(api: api)

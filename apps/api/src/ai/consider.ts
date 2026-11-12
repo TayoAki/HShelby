@@ -198,6 +198,8 @@ export async function considerMessage(deps: Deps, job: AiConsiderJob): Promise<s
   const settings = await getAiSettings(db, row.app.id);
   if (!settings.enabled) return "disabled";
   if (!deps.ai) return "unavailable";
+  // nothing of theirs goes to the model until they allow it in the chat (App Review 5.1.2(i))
+  if (row.device.aiConsent !== "granted") return "no_consent";
   try {
     await deps.billing.requireCanReply(row.conversation.organizationId, row.conversation.id);
   } catch (err) {

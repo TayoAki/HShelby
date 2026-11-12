@@ -40,6 +40,22 @@ enum L10n {
         return format("typing.named", "%@ is typing…", name)
     }
 
+    static var aiConsentTitle: String { string("ai.consent.title", "AI replies") }
+    /// %@: who processes the messages ("OpenRouter and Anthropic").
+    static func aiConsentText(_ processors: [String]) -> String {
+        let names = ListFormatter.localizedString(byJoining: processors.isEmpty ? [string("ai.consent.provider", "an AI provider")] : processors)
+        return format(
+            "ai.consent.text",
+            "Support can answer faster with an AI assistant. If you allow it, your messages here and the details this app shares with support are sent to %@ to write replies. AI replies are labelled, and a person can still answer. You can turn this off anytime in the menu.",
+            names
+        )
+    }
+    static var aiConsentAllow: String { string("ai.consent.allow", "Allow") }
+    static var aiConsentDecline: String { string("ai.consent.decline", "Not now") }
+    static var aiRepliesToggle: String { string("ai.menu.toggle", "AI replies") }
+    static var aiChoiceFailed: String { string("ai.consent.failed", "Your choice couldn't be saved. Check your connection and try again.") }
+    static var moreOptions: String { string("action.more", "More") }
+
     static var aiLabel: String { string("label.ai", "AI") }
     static var aiAccessibility: String { string("label.aiAccessibility", "Written by AI") }
 

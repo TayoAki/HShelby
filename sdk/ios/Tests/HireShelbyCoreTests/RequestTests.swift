@@ -88,6 +88,16 @@ final class RequestTests: XCTestCase {
 
         // the same token isn't sent twice
         XCTAssertNil(desired.updateBody(since: desired, identityToken: "jwt", acknowledgedToken: "jwt").identityToken)
+
+        // the promotional opt-in goes out when it changes, including back to false
+        var optedIn = acknowledged
+        optedIn.promotionalPush = true
+        let optIn = String(decoding: try APIClient.encoder.encode(optedIn.updateBody(since: acknowledged, identityToken: nil, acknowledgedToken: nil)), as: UTF8.self)
+        XCTAssertEqual(optIn, #"{"promotionalPush":true}"#)
+        var optedOut = optedIn
+        optedOut.promotionalPush = false
+        XCTAssertEqual(optedOut.updateBody(since: optedIn, identityToken: nil, acknowledgedToken: nil).promotionalPush, false)
+        XCTAssertTrue(optedIn.updateBody(since: optedIn, identityToken: nil, acknowledgedToken: nil).isEmpty)
     }
 
     func testDropsTheFieldsAValidationErrorNames() {

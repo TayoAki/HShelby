@@ -473,6 +473,13 @@ public final class HireShelbyClient {
         stage { $0.push = nil }
     }
 
+    /// Whether the person opted in, in the app, to promotional notifications (App Review guideline 4.5.4).
+    /// Offers and automations' messages are pushed only when they did; they always appear in the chat, and the
+    /// team's replies always push. Report it whenever the person's choice changes, and at launch.
+    public func setPromotionalPushAllowed(_ allowed: Bool) {
+        stage { $0.promotionalPush = allowed }
+    }
+
     /// Reports the paywalls the app can show right now, replacing the earlier list; the team can send offers only
     /// for these. Invalid entries are skipped with a log: IDs of 1–64 `A–Z a–z 0–9 _ . -`, titles 1–60
     /// characters, at most 20 paywalls, 10 products each and 40 in total.

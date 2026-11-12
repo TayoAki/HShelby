@@ -253,7 +253,7 @@ function Builder({ initial, paywalls, me, onSave, onCancel }: { initial: Draft; 
             </>
           )}
         </Row>
-        <SwitchRow label="Send a push" description="Offers always push." checked={d.withPush ?? true} onChange={(withPush) => set({ withPush })} />
+        <SwitchRow label="Send a push" description="Offers always push. Automations' notifications reach only people who opted in to promotional notifications in your app (Apple requires it); everyone sees the message in the chat." checked={d.withPush ?? true} onChange={(withPush) => set({ withPush })} />
       </SettingsCard>
 
       <SettingsCard title="Then">

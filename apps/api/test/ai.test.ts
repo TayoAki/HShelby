@@ -54,11 +54,18 @@ const sync = async (device: Device) => ((await (await device.sdk("/v1/conversati
 const conversation = async (team: Team, id: string) => ((await (await team.call(`/api/conversations/${id}`)).json()) as any).conversation;
 const runs = async (team: Team) => ((await (await team.call(`/api/apps/${team.appId}/ai/runs`)).json()) as any).runs as any[];
 
-/** A workspace with AI replies on, and a person whose app reported `paywalls`. */
+const allowAi = async (device: Device, consent: "granted" | "declined" = "granted") => {
+  const res = await device.sdk("/v1/ai-consent", { json: { consent } });
+  expect(res.status).toBe(200);
+  return ((await res.json()) as any).ai;
+};
+
+/** A workspace with AI replies on, and a person (who allowed them) whose app reported `paywalls`. */
 async function setup(settings: Record<string, unknown> = {}, paywalls: unknown[] = [PRO]) {
   const team = await workspaceWithApp(app);
   await enable(team, settings);
   const device = await registerDevice(app, team.publicId, { paywalls, identity: { name: "Alex" } });
+  await allowAi(device);
   return { team, device };
 }
 
@@ -209,6 +216,54 @@ describe("answering", () => {
     expect((await sync(device)).filter((m) => m.sender === "agent")).toHaveLength(0);
     fake.respond(() => toolUse("reply", { text: "Settings → Apple ID → Subscriptions → LockdList → Cancel." }));
     expect(await consider(next!)).toBe("replied");
+  });
+});
+
+describe("consent (App Review 5.1.2(i))", () => {
+  it("answers nobody until they allow it in the chat, then answers what's waiting", async () => {
+    const team = await workspaceWithApp(app);
+    const device = await registerDevice(app, team.publicId);
+    const state = async () => ((await (await device.sdk("/v1/conversation")).json()) as any).ai;
+    // AI off: the chat asks nothing
+    expect(await state()).toEqual({ enabled: false, consent: null, processors: [] });
+    await enable(team);
+    expect(await state()).toEqual({ enabled: true, consent: null, processors: ["Anthropic"] });
+
+    const before = fake.requests.length;
+    const job = await write(device, "How do I block Instagram?");
+    expect(await consider(job)).toBe("no_consent");
+    // nothing of theirs reached the model, and the team sees why
+    expect(fake.requests.length).toBe(before);
+    expect((await conversation(team, job.conversationId)).ai).toMatchObject({ state: "active", consent: null });
+
+    // the worker ran that job (it returned no_consent): mark it done, as pg-boss would
+    await deps.db.execute(sql`update pgboss.job set state = 'completed' where name = ${AI_CONSIDER_QUEUE} and data->>'messageId' = ${job.messageId}`);
+    expect((await device.sdk("/v1/ai-consent", { json: { consent: "maybe" } })).status).toBe(400);
+    expect(await allowAi(device)).toEqual({ enabled: true, consent: "granted", processors: ["Anthropic"] });
+    // the waiting message is answered right away
+    const [pending] = await queued(job);
+    expect(pending!.due_in).toBeLessThanOrEqual(1000);
+    fake.respond(() => toolUse("reply", { text: "Settings → Blocks → New block." }));
+    expect(await consider(job)).toBe("replied");
+    const [first] = await deps.db.select({ at: devices.aiConsentAt }).from(devices).where(eq(devices.appId, team.appId));
+    // allowing again changes nothing, and keeps when it was first given
+    await allowAi(device);
+    const [again] = await deps.db.select({ at: devices.aiConsentAt }).from(devices).where(eq(devices.appId, team.appId));
+    expect(again!.at).toEqual(first!.at);
+
+    // turning it off stops the AI for their next messages; the team still answers
+    expect(await allowAi(device, "declined")).toMatchObject({ consent: "declined" });
+    const next = await write(device, "And Safari?");
+    expect(await consider(next)).toBe("no_consent");
+    expect((await conversation(team, next.conversationId)).ai).toMatchObject({ consent: "declined" });
+    expect((await reply(team.call, next.conversationId, "Same steps!")).status).toBe(201);
+  });
+
+  it("names OpenRouter and the pinned provider when replies go through OpenRouter", () => {
+    const client = new Anthropic({ apiKey: null, authToken: "k" });
+    expect(aiProvider("openrouter", client).processors).toEqual(["OpenRouter", "Anthropic"]);
+    expect(aiProvider("openrouter", client, undefined, ["anthropic", "amazon-bedrock"]).processors).toEqual(["OpenRouter", "Anthropic", "Amazon Web Services"]);
+    expect(aiProvider("anthropic", client).processors).toEqual(["Anthropic"]);
   });
 });
 

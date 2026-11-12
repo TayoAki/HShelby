@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { AiConversation } from "./ai";
+import { AiConversation, SdkAi } from "./ai";
 import { LocalAppearance } from "./appearance";
 import { DeviceSubscription } from "./subscriptions";
 import { InboxCard, MessageKind, ReportedPaywall, ReportedPaywalls, SdkCard } from "./cards";
@@ -68,6 +68,11 @@ const DeviceState = {
   metadata: Metadata.optional(),
   /** null clears the token (e.g. notifications were turned off). */
   push: PushRegistration.nullable().optional(),
+  /**
+   * The person opted in, in the app, to promotional notifications (App Review guideline 4.5.4). Offers and
+   * automations' messages are pushed only then; they always appear in the chat.
+   */
+  promotionalPush: z.boolean().optional(),
   /** The paywalls the app can show right now (phase B7); offers can only name these. */
   paywalls: ReportedPaywalls.optional(),
   /** The app's own appearance settings (phase B9), where the dashboard's design editor starts. */
@@ -152,6 +157,7 @@ export type SdkSending = z.infer<typeof SdkSending>;
 export const SdkSync = z.object({
   identity: SdkIdentity,
   sending: SdkSending,
+  ai: SdkAi,
   conversation: SdkConversation.nullable(),
   messages: z.array(SdkMessage),
   hasMore: z.boolean(),

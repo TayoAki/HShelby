@@ -41,7 +41,7 @@ public final class HireShelby {
         #if canImport(UIKit)
         /// The chat's look: match it to the app.
         public var theme: Theme
-        /// What a review card's button does.
+        /// What a review card's button does: Apple's rating prompt by default (App Review guideline 5.6.1).
         public var reviewPrompt: ReviewPrompt
         #endif
 
@@ -53,7 +53,7 @@ public final class HireShelby {
             logHandler: HireShelbyLogHandler? = nil,
             updatesAppBadge: Bool = true,
             usesRemoteAppearance: Bool = true,
-            reviewPrompt: ReviewPrompt = .appStorePage
+            reviewPrompt: ReviewPrompt = .inAppPrompt
         ) {
             self.apiBaseURL = apiBaseURL
             self.theme = theme
@@ -228,6 +228,22 @@ public final class HireShelby {
         withClient { $0.setMetadata(metadata) }
     }
 
+    // MARK: AI replies
+
+    /// AI replies in the chat, as of the chat's last load: whether the team turned them on and what the person
+    /// chose. The chat asks the person itself; use this for a switch in the app's own settings.
+    public var aiReplies: HireShelbyConversation.AIReplies {
+        client?.conversation.aiReplies ?? .off
+    }
+
+    /// Allows AI replies for this person, or turns them off: for a switch in the app's own settings (the chat
+    /// asks, and has the same switch in its menu). Only the person should make this choice; never call it for them.
+    /// - Throws: ``HireShelbyError``, e.g. ``HireShelbyError/Code/connectionFailed`` offline (try again).
+    public func setAIRepliesAllowed(_ allowed: Bool) async throws {
+        guard let client else { throw HireShelbyError(code: .notConfigured, message: "Call HireShelby.configure(appId:) first") }
+        try await client.conversation.setAIReplies(allowed: allowed)
+    }
+
     // MARK: Push
 
     /// Forwards the APNs device token from `application(_:didRegisterForRemoteNotificationsWithDeviceToken:)`, so
@@ -239,6 +255,13 @@ public final class HireShelby {
     /// Stops notifications to this device.
     public func clearPushToken() {
         withClient { $0.clearPushToken() }
+    }
+
+    /// Whether the person opted in, in your app, to promotional notifications (App Review guideline 4.5.4). Offers
+    /// and automations' messages reach the lock screen only when they did (they always appear in the chat); the
+    /// team's replies always do. Off until you report it.
+    public func setPromotionalPushAllowed(_ allowed: Bool) {
+        withClient { $0.setPromotionalPushAllowed(allowed) }
     }
 
     /// Handles a notification the user tapped (`userNotificationCenter(_:didReceive:)`): for Hire Shelby

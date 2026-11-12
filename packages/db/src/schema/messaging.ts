@@ -1,4 +1,4 @@
-import type { AiState, DeviceSubscription, ReportedPaywall, StoredCard } from "@hshelby/contracts";
+import type { AiConsent, AiState, DeviceSubscription, ReportedPaywall, StoredCard } from "@hshelby/contracts";
 import { sql } from "drizzle-orm";
 import { bigint, boolean, index, integer, jsonb, pgTable, text, timestamp, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 import { apps } from "./apps";
@@ -44,6 +44,8 @@ export const devices = pgTable(
     pushEnv: text("push_env", { enum: ["sandbox", "production"] }),
     /** Whether pushes set the app icon badge (false when the host app owns its badge). */
     updatesAppBadge: boolean("updates_app_badge").notNull().default(true),
+    /** The person opted in to promotional notifications in the app (App Review 4.5.4): offers and automations push. */
+    promotionalPush: boolean("promotional_push").notNull().default(false),
     /** The last APNs rejection for this device, shown in the dashboard; cleared by a delivery or a new token. */
     pushIssue: text("push_issue"),
     pushIssueAt: ts("push_issue_at"),
@@ -59,6 +61,9 @@ export const devices = pgTable(
     /** The paywalls the app last reported it can show (phase B7), replaced whole on every report. */
     availablePaywalls: jsonb("available_paywalls").$type<ReportedPaywall[]>().notNull().default([]),
     paywallsReportedAt: ts("paywalls_reported_at"),
+    /** The person's answer to the chat's AI question (App Review 5.1.2(i)); the AI answers only after `granted`. */
+    aiConsent: text("ai_consent").$type<AiConsent>(),
+    aiConsentAt: ts("ai_consent_at"),
     /** The last review card sent to this device: automations skip devices already asked. */
     reviewAskedAt: ts("review_asked_at"),
     /** The subscription as the latest provider event left it (phase B10). */

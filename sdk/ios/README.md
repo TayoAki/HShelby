@@ -151,6 +151,14 @@ Hire Shelby notifications carry `userInfo["hireshelby"] = {conversationId, messa
 the unread count (pushes carry it); set `options.updatesAppBadge = false` if your app owns its badge.
 `clearPushToken()` stops pushes to the device.
 
+The team's replies always push. Offers and automations' messages are promotional, so Apple (guideline 4.5.4) lets
+them reach the lock screen only for people who opted in to promotional notifications in your app; they always
+appear in the chat. If your app asks for that opt-in, report it:
+
+```swift
+HireShelby.shared.setPromotionalPushAllowed(user.allowsPromotionalNotifications)
+```
+
 ### 5. Build and check
 
 Run the app on a simulator, open Support and send a message: it appears in the dashboard inbox. Reply there and
@@ -225,9 +233,11 @@ HireShelby.shared.onPaywall = { paywallId in
 IDs are 1–64 of `A–Z a–z 0–9 _ . -`, titles 1–60 characters (only the team sees them), at most 20 paywalls.
 An offer for a paywall the app no longer reports shows "No longer available".
 
-**Review requests** open the App Store's write-review page (`options.reviewPrompt = .appStorePage`, the default) or
-Apple's in-app prompt (`.inAppPrompt`, which Apple may not show). Set the app's App Store ID in the dashboard;
-without it, review cards show their text only. Taps are reported to the team once.
+**Review requests** show Apple's in-app rating prompt (`options.reviewPrompt = .inAppPrompt`, the default), the API
+App Review guideline 5.6.1 asks for; Apple decides whether it appears, so a tap may show nothing. `.appStorePage`
+opens the App Store's write-review page instead (it always works, but see [App Review](#app-review)). Set the
+app's App Store ID in the dashboard; without it, review cards show their text only. Taps are reported to the team
+once.
 
 **Automations** start from events the app tracks. Only events an enabled automation listens for leave the device:
 
@@ -292,6 +302,40 @@ excluded from backups).
 user's identity*, *not used for tracking*, purpose *App Functionality*. Add *Developer's Advertising or Marketing*
 for Product Interaction and Purchase History if you send offers. Logs (`options.logLevel`, OSLog subsystem
 `com.hireshelby.sdk`) never contain secrets, tokens, message text, identity or metadata values.
+
+## AI replies
+
+When the team turns on AI replies in the dashboard, the chat asks each person first, naming who receives their
+messages (for example "OpenRouter and Anthropic"). The AI answers only people who tap **Allow**; everyone else
+gets the team. The person can change their mind in the chat's ⋯ menu. AI replies are labelled "AI".
+
+Apps with their own settings screen can offer the same switch:
+
+```swift
+Toggle("AI replies in Support", isOn: Binding(
+    get: { HireShelby.shared.aiReplies.isAllowed },
+    set: { allowed in Task { try? await HireShelby.shared.setAIRepliesAllowed(allowed) } }
+))
+.disabled(!HireShelby.shared.aiReplies.isEnabled)
+```
+
+Only the person makes this choice: never call `setAIRepliesAllowed(true)` for them.
+
+## App Review
+
+What the SDK does for the App Review Guidelines, and what's left for you:
+
+| Guideline | The SDK | You |
+|---|---|---|
+| 5.1.1(i), 5.1.2 Privacy | Ships a privacy manifest; collects only what's listed under [Privacy](#privacy) | Answer the App Store privacy questions as below; mention Hire Shelby in your privacy policy ([template](https://app.hireshelby.com/legal/end-user-privacy)) |
+| 5.1.2(i) Third-party AI | Asks before any message goes to the AI, names who receives it, labels AI replies, lets the person turn it off | Nothing, unless you add your own AI switch (only the person may turn it on) |
+| 5.1.1(v) Account deletion | `deleteData()` removes the person's support data | Await it in your account-deletion flow |
+| 5.6.1 Ratings | Review cards use Apple's rating prompt by default | Don't offer anything in return for a review |
+| 4.5.4 Push notifications | Never asks for permission. The team's replies push; offers and automations' messages push only after `setPromotionalPushAllowed(true)` (they always show in the chat) | Ask for permission in your own flow, if at all. Report your own promotional-notifications opt-in, and only if you ask for one with clear wording and let people turn it off |
+| 1.3 Kids Category | Not designed for children's apps | Don't use it in apps in the Kids Category |
+
+**App Review notes:** say that Support (the chat) lets people write to your team, and that replies may come from
+an AI assistant once the person allows it in the chat.
 
 ## Development
 

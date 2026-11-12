@@ -191,7 +191,7 @@ export default function AiPage() {
             )}
             <SwitchRow
               label="Answer with AI"
-              description="When a teammate replies in a conversation, the AI steps back there until someone hands it back or resolves the conversation."
+              description="The chat asks each person first and the AI answers only those who allow it, as Apple requires (App Review 5.1.2(i)); your team answers everyone else. When a teammate replies in a conversation, the AI steps back there until someone hands it back or resolves the conversation."
               checked={overview.settings.enabled}
               onChange={(enabled) => save({ ...draft, enabled })}
               disabled={!admin || busy || (!overview.available && !overview.settings.enabled)}

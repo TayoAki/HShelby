@@ -1,5 +1,6 @@
 import {
   ActionClickInput,
+  AiConsentInput,
   isSubscriptionEvent,
   TrackInput,
   DeviceUpdateInput,
@@ -16,13 +17,14 @@ import {
   type PushRegistration,
   type LocalAppearance,
   type ReportedPaywall,
+  type SdkAi,
   type SdkConversation,
   type SdkMessage,
   type UploadTicket,
 } from "@hshelby/contracts";
 import { decryptSecret, newDeviceSecret, uuidv7 } from "@hshelby/core";
-import { appAppearance, apps, attachments, automations, conversations, devices, type Db, type Tx } from "@hshelby/db";
-import { and, count, eq, gt, isNull, ne, sql } from "drizzle-orm";
+import { aiSettings, appAppearance, apps, attachments, automations, conversations, devices, messages, type Db, type Tx } from "@hshelby/db";
+import { and, count, desc, eq, gt, isNull, ne, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { createMiddleware } from "hono/factory";
 import type { Deps, SdkEnv } from "../context";
@@ -56,6 +58,17 @@ const toSdkConversation = (c: ConversationRow): SdkConversation => ({
 });
 
 type SdkApp = SdkEnv["Variables"]["app"];
+
+/**
+ * The chat's AI state: on when the app turned AI replies on and the API has a model, so the chat asks the person
+ * before any of their messages reach the AI (App Review 5.1.2(i)).
+ */
+async function sdkAi(deps: Deps, appId: string, consent: SdkAi["consent"]): Promise<SdkAi> {
+  if (!deps.ai) return { enabled: false, consent, processors: [] };
+  const [row] = await deps.db.select({ enabled: aiSettings.enabled }).from(aiSettings).where(eq(aiSettings.appId, appId));
+  const enabled = row?.enabled ?? false;
+  return { enabled, consent, processors: enabled ? deps.ai.processors : [] };
+}
 type Author = SdkMessage["author"];
 
 /**
@@ -225,6 +238,7 @@ export function sdkRoutes(deps: Deps) {
           ...identity,
           metadata: input.metadata ? nextMetadata({}, input.metadata) : {},
           ...pushColumns(input.push),
+          ...(input.promotionalPush !== undefined && { promotionalPush: input.promotionalPush }),
           ...paywallColumns(input.paywalls),
           ...(input.storekit && { reportedPaying: input.storekit.paying ?? null, originalTransactionIds: input.storekit.originalTransactionIds?.slice(-50) ?? [] }),
         })
@@ -295,6 +309,7 @@ export function sdkRoutes(deps: Deps) {
           ...nextIdentity(current!, input.identity, claims),
           ...(input.metadata && { metadata: nextMetadata(current!.metadata, input.metadata) }),
           ...pushColumns(input.push),
+          ...(input.promotionalPush !== undefined && { promotionalPush: input.promotionalPush }),
           ...paywallColumns(input.paywalls),
           ...storekitColumns(input.storekit),
           updatedAt: new Date(),
@@ -327,7 +342,11 @@ export function sdkRoutes(deps: Deps) {
   r.get("/conversation", auth, async (c) => {
     const query = parseQuery(c, MessagePageQuery);
     const device = c.get("device");
-    const state = { identity: toSdkIdentity(device), sending: sendingState(device, c.get("app").onlyVerified) };
+    const state = {
+      identity: toSdkIdentity(device),
+      sending: sendingState(device, c.get("app").onlyVerified),
+      ai: await sdkAi(deps, device.appId, device.aiConsent),
+    };
     const [conversation] = await db
       .select()
       .from(conversations)
@@ -422,6 +441,42 @@ export function sdkRoutes(deps: Deps) {
       { message: toSdkMessage(result.message, attachmentsOf, app.appStoreId), conversation: toSdkConversation(result.conversation) },
       result.created ? 201 : 200,
     );
+  });
+
+  /**
+   * The person's answer to the chat's AI question. Allowing it lets the AI answer their latest message if it's
+   * still waiting; declining (at any time) stops the AI answering them. Either way the team still answers.
+   */
+  r.post("/ai-consent", auth, async (c) => {
+    const { consent } = await parseJson(c, AiConsentInput);
+    const device = c.get("device");
+    await db.transaction(async (tx) => {
+      // a repeated answer keeps the time it was first given
+      const [updated] = await tx
+        .update(devices)
+        .set({ aiConsent: consent, aiConsentAt: new Date(), updatedAt: new Date() })
+        .where(and(eq(devices.id, device.id), sql`${devices.aiConsent} is distinct from ${consent}`))
+        .returning({ id: devices.id });
+      if (!updated) return;
+      const [conversation] = await tx
+        .select()
+        .from(conversations)
+        .where(and(eq(conversations.deviceId, device.id), isNull(conversations.supersededAt)))
+        .limit(1);
+      if (!conversation) return;
+      if (consent === "granted" && conversation.aiState === "active") {
+        const [last] = await tx
+          .select({ id: messages.id, sender: messages.sender })
+          .from(messages)
+          .where(eq(messages.conversationId, conversation.id))
+          .orderBy(desc(messages.seq))
+          .limit(1);
+        const [ai] = await tx.select({ enabled: aiSettings.enabled }).from(aiSettings).where(eq(aiSettings.appId, device.appId));
+        if (last?.sender === "user" && ai?.enabled) await deps.jobs.considerAi(tx, { conversationId: conversation.id, messageId: last.id }, 0);
+      }
+      await publishLive(tx, { type: "conversation", organizationId: conversation.organizationId, conversationId: conversation.id, deviceId: device.id });
+    });
+    return c.json({ ai: await sdkAi(deps, device.appId, consent) });
   });
 
   /**

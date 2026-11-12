@@ -37,6 +37,8 @@ public final class HireShelbyConversation {
     /// The first load from the server finished (cached messages may show before).
     public private(set) var hasLoaded = false
     public private(set) var sending = SendingState.allowed
+    /// AI replies here: ask with ``AIReplies/needsConsent``, answer with ``setAIReplies(allowed:)``.
+    public private(set) var aiReplies = AIReplies.off
     public private(set) var typing: Typing?
     public private(set) var connection = ConnectionState.idle
     /// The team has read the conversation up to this `seq` (from live updates while the chat is open).
@@ -66,6 +68,8 @@ public final class HireShelbyConversation {
     private var generation = 0
     private var flushingClicks = false
     private var flushClicksAgain = false
+    /// The server's AI state as last seen, kept with the cache so the question doesn't flicker on reopening.
+    private var aiState: WireAI?
 
     struct PendingClick: Codable, Equatable, Sendable {
         let messageId: String
@@ -76,6 +80,7 @@ public final class HireShelbyConversation {
         var conversation: WireConversation?
         var messages: [WireMessage]
         var hasOlderMessages: Bool
+        var ai: WireAI?
     }
 
     static let cacheFile = "conversation.json"
@@ -96,6 +101,8 @@ public final class HireShelbyConversation {
             confirmed = cache.messages.sorted { $0.seq < $1.seq }
             conversation = cache.conversation
             hasOlderMessages = cache.hasOlderMessages
+            aiState = cache.ai
+            aiReplies = cache.ai.map(AIReplies.init) ?? .off
         }
         rebuild(notify: false)
     }
@@ -190,6 +197,8 @@ public final class HireShelbyConversation {
         lastReadPosted = 0
         typing = nil
         sending = .allowed
+        aiState = nil
+        aiReplies = .off
         pendingClicks = []
         services.files.remove(Self.clicksFile)
         services.files.remove(Self.cacheFile)
@@ -325,6 +334,8 @@ public final class HireShelbyConversation {
     private func applyState(_ sync: WireSync) {
         onIdentity?(sync.identity)
         sending = SendingState(sync.sending)
+        aiState = sync.ai
+        aiReplies = sync.ai.map(AIReplies.init) ?? .off
         if let latest = sync.conversation {
             if let current = conversation, current.id != latest.id {
                 // the team started over (a reset): the old messages belong to another conversation
@@ -375,9 +386,41 @@ public final class HireShelbyConversation {
         }
         let recent = Array(confirmed.suffix(Self.cacheSize))
         services.files.write(
-            Cache(conversation: conversation, messages: recent, hasOlderMessages: hasOlderMessages || recent.count < confirmed.count),
+            Cache(
+                conversation: conversation, messages: recent,
+                hasOlderMessages: hasOlderMessages || recent.count < confirmed.count, ai: aiState
+            ),
             to: Self.cacheFile
         )
+    }
+
+    // MARK: AI replies
+
+    /// Records the person's answer to the chat's AI question, or a change of mind later. Shown at once; put back
+    /// if the server can't be reached (the error says why). Allowing it lets the AI answer a message that's
+    /// still waiting; declining stops it answering them. The team answers either way.
+    public func setAIReplies(allowed: Bool) async throws {
+        let previous = aiReplies
+        let generation = self.generation
+        aiReplies.consent = allowed ? .granted : .declined
+        notify()
+        do {
+            let result = try await services.session.send(
+                .post("/v1/ai-consent", WireAIConsentInput(consent: allowed ? "granted" : "declined")),
+                as: WireAIConsentResult.self
+            )
+            guard generation == self.generation else { return }
+            aiState = result.ai
+            aiReplies = AIReplies(result.ai)
+            saveCache()
+            notify()
+            onEvent?(.aiRepliesChanged(allowed: allowed))
+        } catch {
+            guard generation == self.generation else { throw error }
+            aiReplies = previous
+            notify()
+            throw error
+        }
     }
 
     // MARK: Reading

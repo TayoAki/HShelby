@@ -39,7 +39,31 @@ export type AiSettings = z.infer<typeof AiSettings>;
 export const AiState = z.enum(["active", "paused", "handed_over"]);
 export type AiState = z.infer<typeof AiState>;
 
-export const AiConversation = z.object({ state: AiState, reason: z.string().nullable(), at: z.string().nullable() });
+/**
+ * What the person said in the chat about AI replies (App Review guideline 5.1.2(i): their messages go to a
+ * third-party AI only after they allow it). Null until they choose; the AI never answers without `granted`.
+ */
+export const AiConsent = z.enum(["granted", "declined"]);
+export type AiConsent = z.infer<typeof AiConsent>;
+
+/** `POST /v1/ai-consent`: the person's choice in the chat. */
+export const AiConsentInput = z.object({ consent: AiConsent }).strict();
+export type AiConsentInput = z.infer<typeof AiConsentInput>;
+
+/**
+ * The chat's AI state, in `GET /v1/conversation`: whether the app's AI may answer (so the chat asks), the
+ * person's choice, and who processes the messages when they allow it (named in the chat's question).
+ */
+export const SdkAi = z.object({ enabled: z.boolean(), consent: AiConsent.nullable(), processors: z.array(z.string()) });
+export type SdkAi = z.infer<typeof SdkAi>;
+
+export const AiConversation = z.object({
+  state: AiState,
+  reason: z.string().nullable(),
+  at: z.string().nullable(),
+  /** The person's choice in the chat; the AI only answers people who allowed it. */
+  consent: AiConsent.nullable(),
+});
 export type AiConversation = z.infer<typeof AiConversation>;
 
 /** `POST /api/conversations/:id/ai`: hand the conversation back to the AI, or pause it. */

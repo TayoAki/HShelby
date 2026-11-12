@@ -16,11 +16,14 @@ struct PlatformState {
 extension HireShelby {
     /// What a review card's button does.
     public enum ReviewPrompt: Sendable, Equatable {
-        /// Opens the App Store's write-review page. Reliable; the user leaves the app for a moment.
-        case appStorePage
-        /// Shows Apple's in-app rating prompt (`AppStore.requestReview(in:)`). Apple decides whether it appears
-        /// (at most three times a year per user), so a tap may show nothing.
+        /// Shows Apple's in-app rating prompt (`AppStore.requestReview(in:)`), the API App Review guideline 5.6.1
+        /// asks apps to use. The default. Apple decides whether it appears (at most three times a year per user),
+        /// so a tap may show nothing.
         case inAppPrompt
+        /// Opens the App Store's write-review page. Always works, and the user leaves the app for a moment. Apple
+        /// allows a write-review link behind a button the user taps, but the card itself asks for a review, so
+        /// choose this only if you're comfortable defending it in App Review.
+        case appStorePage
     }
 
     // MARK: Presenting the chat

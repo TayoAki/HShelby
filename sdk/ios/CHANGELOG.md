@@ -8,6 +8,12 @@ All notable changes to the Hire Shelby iOS SDK. The format follows
 
 ### Added
 
+- AI replies ask first (App Review guideline 5.1.2(i)): the chat shows who would receive the person's messages and
+  the AI answers only people who allow it; a menu switch turns it off. `HireShelby.shared.aiReplies` and
+  `setAIRepliesAllowed(_:)` for the app's own settings.
+- `setPromotionalPushAllowed(_:)`: offers and automations' messages push only with the person's opt-in to
+  promotional notifications (guideline 4.5.4).
+- Review cards use Apple's rating prompt by default (`reviewPrompt: .inAppPrompt`, guideline 5.6.1).
 - `HireShelby.configure(appId:options:)` with the API base URL, theme, logging, app badge and remote design options.
 - Identity: `identify(userId:name:email:)`, verified identity with `identify(token:)`, `logout()`, `deleteData()`,
   `setMetadata(_:)`; a different user on the device starts a new session.

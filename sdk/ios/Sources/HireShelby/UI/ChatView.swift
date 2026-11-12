@@ -58,6 +58,7 @@ private struct ChatScreen: View {
             if model.isConfigured {
                 VStack(spacing: 0) {
                     if model.isOffline { banner(L10n.offline) }
+                    if let error = model.aiError { banner(error) }
                     messageList
                     footer
                 }
@@ -80,6 +81,20 @@ private struct ChatScreen: View {
                         StyleIcon(icon: style.closeIcon, size: 15)
                     }
                     .accessibilityLabel(L10n.close)
+                }
+            }
+            ToolbarItem(placement: .primaryAction) {
+                // once the person has answered the AI question, they can change their mind here
+                if model.aiReplies.isEnabled, model.aiReplies.consent != nil {
+                    Menu {
+                        Toggle(isOn: Binding(get: { model.aiReplies.isAllowed }, set: { model.setAIReplies(allowed: $0) })) {
+                            Label(L10n.aiRepliesToggle, systemImage: "sparkles")
+                        }
+                        .disabled(model.isSavingAIChoice)
+                    } label: {
+                        Image(systemName: "ellipsis.circle")
+                    }
+                    .accessibilityLabel(L10n.moreOptions)
                 }
             }
         }
@@ -167,8 +182,43 @@ private struct ChatScreen: View {
                 .padding()
                 .background(.bar)
         } else {
-            composer
+            VStack(spacing: 0) {
+                if model.aiReplies.needsConsent { aiConsentCard }
+                composer
+            }
         }
+    }
+
+    /// Asks before any of the person's messages go to the AI (App Review 5.1.2(i)). Both answers weigh the same.
+    private var aiConsentCard: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label(L10n.aiConsentTitle, systemImage: "sparkles")
+                .font(style.body.weight(.semibold))
+            Text(L10n.aiConsentText(model.aiReplies.processors))
+                .font(style.footnote)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            HStack(spacing: 10) {
+                Button { model.setAIReplies(allowed: true) } label: {
+                    Text(L10n.aiConsentAllow).frame(maxWidth: .infinity)
+                }
+                Button { model.setAIReplies(allowed: false) } label: {
+                    Text(L10n.aiConsentDecline).frame(maxWidth: .infinity)
+                }
+            }
+            .buttonStyle(.bordered)
+            .disabled(model.isSavingAIChoice)
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 16, style: .continuous)
+                .fill(Color(uiColor: .secondarySystemBackground))
+        )
+        .accessibilityElement(children: .contain)
+        .padding(.horizontal, 12)
+        .padding(.top, 8)
+        .background(.bar)
     }
 
     private var composer: some View {

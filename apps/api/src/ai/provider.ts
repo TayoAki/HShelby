@@ -22,6 +22,16 @@ export type AiProvider = {
   serverFallback: boolean;
   /** Fields added to every request: OpenRouter's routing preferences. */
   extraBody: Record<string, unknown>;
+  /** The companies a person's messages go to, named in the chat when it asks to allow AI replies. */
+  processors: string[];
+};
+
+/** OpenRouter's provider slugs as people know the companies. */
+const PROVIDER_NAMES: Record<string, string> = {
+  anthropic: "Anthropic",
+  "amazon-bedrock": "Amazon Web Services",
+  "google-vertex": "Google Cloud",
+  azure: "Microsoft Azure",
 };
 
 export const DEFAULT_MODEL: Record<AiProviderName, string> = {
@@ -35,7 +45,14 @@ export function openRouterRouting(providers: string[]) {
 }
 
 export function aiProvider(name: AiProviderName, client: Anthropic, model = DEFAULT_MODEL[name], openRouterProviders = ["anthropic"]): AiProvider {
-  return { name, client, model, serverFallback: name === "anthropic", extraBody: name === "openrouter" ? openRouterRouting(openRouterProviders) : {} };
+  return {
+    name,
+    client,
+    model,
+    serverFallback: name === "anthropic",
+    extraBody: name === "openrouter" ? openRouterRouting(openRouterProviders) : {},
+    processors: name === "anthropic" ? ["Anthropic"] : ["OpenRouter", ...openRouterProviders.map((p) => PROVIDER_NAMES[p] ?? p)],
+  };
 }
 
 type AiEnv = Pick<Env, "ANTHROPIC_API_KEY" | "ANTHROPIC_BASE_URL" | "OPENROUTER_API_KEY" | "OPENROUTER_BASE_URL" | "OPENROUTER_PROVIDERS" | "AI_MODEL">;

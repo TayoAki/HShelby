@@ -108,6 +108,7 @@ final class FakeAPI: @unchecked Sendable {
         var messages: [WireMessage] = []
         var userReadSeq = 0
         var conversationId: String?
+        var aiConsent: String?
     }
 
     enum Fault {
@@ -125,6 +126,8 @@ final class FakeAPI: @unchecked Sendable {
     private(set) var tracked: [String] = []
     private(set) var logouts: [String] = []
     var trackedEventNames = ["paywall_declined"]
+    /// The app turned AI replies on (what `GET /v1/conversation` reports).
+    var aiEnabled = false
     let storageHost = "storage.test"
 
     func locked<T>(_ body: () throws -> T) rethrows -> T {
@@ -300,9 +303,15 @@ final class FakeAPI: @unchecked Sendable {
                 hasMore = older.count > limit
             }
             return .json(200, encoding: SyncBody(
-                identity: device.identity, sending: WireSending(allowed: true, reason: nil),
+                identity: device.identity, sending: WireSending(allowed: true, reason: nil), ai: ai(device),
                 conversation: conversation(device), messages: page, hasMore: hasMore
             ))
+        case ("POST", "/v1/ai-consent"):
+            guard let consent = body["consent"] as? String, ["granted", "declined"].contains(consent) else {
+                return .error(400, "validation_failed", "consent: expected granted or declined")
+            }
+            device.aiConsent = consent
+            return .json(200, encoding: ["ai": ai(device)])
         case ("POST", "/v1/messages"):
             let clientId = body["clientId"] as? String ?? ""
             if let existing = device.messages.first(where: { $0.clientId == clientId }) {
@@ -353,9 +362,18 @@ final class FakeAPI: @unchecked Sendable {
         let identity: WireIdentity
     }
 
+    private func ai(_ device: Device) -> WireAI {
+        WireAI(enabled: aiEnabled, consent: device.aiConsent, processors: aiEnabled ? ["OpenRouter", "Anthropic"] : [])
+    }
+
+    func aiConsent(of deviceId: String) -> String? {
+        locked { devices[deviceId]?.aiConsent }
+    }
+
     private struct SyncBody: Encodable {
         let identity: WireIdentity
         let sending: WireSending
+        let ai: WireAI
         let conversation: WireConversation?
         let messages: [WireMessage]
         let hasMore: Bool

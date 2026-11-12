@@ -37,6 +37,8 @@ final class ChatViewModel: ObservableObject {
     @Published private(set) var isProcessingPhotos = false
     @Published var photoError: String?
     @Published private(set) var rows: [Row] = []
+    @Published private(set) var isSavingAIChoice = false
+    @Published var aiError: String?
 
     let facade: HireShelby
     let conversation: HireShelbyConversation?
@@ -75,6 +77,7 @@ final class ChatViewModel: ObservableObject {
     var typing: HireShelbyConversation.Typing? { conversation?.typing }
     var isOffline: Bool { conversation?.connection == .offline }
     var sending: HireShelbyConversation.SendingState { conversation?.sending ?? .allowed }
+    var aiReplies: HireShelbyConversation.AIReplies { conversation?.aiReplies ?? .off }
     var lastRowID: String? { rows.last?.id }
     var showsWelcome: Bool { rows.isEmpty && !hasOlderMessages }
 
@@ -93,6 +96,21 @@ final class ChatViewModel: ObservableObject {
         conversation.send(text: trimmedDraft, photos: photos)
         draft = ""
         photos = []
+    }
+
+    /// The person's answer to the AI question, or a change of mind from the menu.
+    func setAIReplies(allowed: Bool) {
+        guard let conversation, !isSavingAIChoice else { return }
+        isSavingAIChoice = true
+        aiError = nil
+        Task { @MainActor in
+            do {
+                try await conversation.setAIReplies(allowed: allowed)
+            } catch {
+                aiError = L10n.aiChoiceFailed
+            }
+            isSavingAIChoice = false
+        }
     }
 
     func draftChanged() {

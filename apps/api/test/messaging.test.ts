@@ -86,6 +86,7 @@ describe("sending", () => {
     expect(empty).toEqual({
       identity: { userId: null, name: null, email: null, verified: false },
       sending: { allowed: true, reason: null },
+      ai: { enabled: false, consent: null, processors: [] },
       conversation: null,
       messages: [],
       hasMore: false,
